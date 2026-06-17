@@ -38,8 +38,9 @@ export function extractTraceparent(
     return undefined;
   }
   const traceId = match[2];
-  // All-zero trace-id is invalid per spec.
-  if (!traceId || /^0+$/.test(traceId)) {
+  // All-zero trace-id is invalid per spec. The capture group already guarantees
+  // exactly 32 hex chars, so a constant compare is equivalent to /^0+$/.
+  if (traceId === '00000000000000000000000000000000') {
     return undefined;
   }
   return traceId;

@@ -65,9 +65,6 @@ export interface ContextConfig {
   deserialize?: (carrier: ContextCarrier) => ContextStore;
 }
 
-/** Fields carried by default when no `carrier`/`serialize` override is set. */
-const DEFAULT_CARRIER: (keyof ContextStore)[] = ['traceId', 'tenantId', 'userRef'];
-
 /**
  * Module-level config. Empty until `forRoot` calls {@link Context.configure},
  * so `serialize`/`deserialize` keep their default behaviour out of the box.
@@ -124,7 +121,21 @@ function fromCarrier(carrier: ContextCarrier): ContextStore {
 }
 
 function defaultSerialize(store: ContextStore): ContextCarrier {
-  const fields = config.carrier ?? DEFAULT_CARRIER;
+  const fields = config.carrier;
+  // Fast path: the default carrier (no `config.carrier` override) is the common
+  // case, so hand-roll it and skip the per-iteration `traceId` filter + loose
+  // Record. Behaviour is identical to the generic loop over the former
+  // default carrier `['traceId', 'tenantId', 'userRef']`.
+  if (fields === undefined) {
+    const c: ContextCarrier = { traceId: store.traceId };
+    if (store.tenantId !== undefined) {
+      c.tenantId = store.tenantId;
+    }
+    if (store.userRef !== undefined) {
+      c.userRef = store.userRef;
+    }
+    return c;
+  }
   // `traceId` is always present on a carrier.
   const carrier: Record<string, unknown> = { traceId: store.traceId };
   for (const field of fields) {

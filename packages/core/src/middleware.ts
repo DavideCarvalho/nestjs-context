@@ -41,8 +41,10 @@ export class ContextMiddleware implements NestMiddleware {
     const extra = this.options.initialize?.(req);
     if (extra) {
       Object.assign(store, extra);
+      // Re-assert traceId only when initialize() actually merged a bag that
+      // could have clobbered it; the common (no-hook) path skips the rewrite.
+      store.traceId = traceId;
     }
-    store.traceId = traceId;
     // Treat an empty-string `x-request-id` as absent (LOW).
     if (requestId) {
       store.requestId = requestId;
