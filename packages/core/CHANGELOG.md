@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-context
 
+## 0.2.1
+
+### Patch Changes
+
+- [`eba468f`](https://github.com/DavideCarvalho/nestjs-context/commit/eba468fd399aea462170dda214c9d7ad2ab991a5) - perf: faster per-request context hot path — constant-compare the traceparent all-zero check, skip the redundant traceId rewrite when no `initialize()` hook is configured, and hand-roll `defaultSerialize` for the default carrier.
+
 ## 0.2.0
 
 ### Minor Changes
