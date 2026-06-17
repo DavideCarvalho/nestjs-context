@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-context",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Shared AsyncLocalStorage context for NestJS — carries user/tenant/traceId across the request and the ecosystem.",
   "license": "MIT",
   "repository": {
