@@ -1,6 +1,6 @@
 {
   "name": "@dudousxd/nestjs-context-testing",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Testing helpers for @dudousxd/nestjs-context — run code inside a fake context store.",
   "license": "MIT",
   "repository": {
