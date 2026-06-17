@@ -4,10 +4,12 @@ import {
   type MiddlewareConsumer,
   Module,
   type NestModule,
+  type OnModuleInit,
   type Provider,
 } from '@nestjs/common';
 import { contextAccessor } from './accessor.js';
 import { Context } from './context.js';
+import { wireContextIntoDiagnostics } from './diagnostics-bridge.js';
 import { ContextMiddleware } from './middleware.js';
 import { CONTEXT_ACCESSOR, CONTEXT_MODULE_OPTIONS } from './tokens.js';
 import type { ContextModuleOptions } from './types.js';
@@ -18,10 +20,20 @@ import type { ContextModuleOptions } from './types.js';
  * global {@link CONTEXT_ACCESSOR} token other libs inject. See DESIGN §4.
  */
 @Module({})
-export class ContextModule implements NestModule {
+export class ContextModule implements NestModule, OnModuleInit {
   constructor(
     @Inject(CONTEXT_MODULE_OPTIONS) private readonly options: ContextModuleOptions = {},
   ) {}
+
+  /**
+   * Register this accessor with `@dudousxd/nestjs-diagnostics` when present, so the
+   * `traceId` on every `aviary:*` event auto-fills. Nest awaits `onModuleInit`
+   * before the app serves traffic, so the bridge is in place before any emit. Soft
+   * and optional — see {@link wireContextIntoDiagnostics}.
+   */
+  async onModuleInit(): Promise<void> {
+    await wireContextIntoDiagnostics();
+  }
 
   static forRoot(options: ContextModuleOptions = {}): DynamicModule {
     // Push the cross-boundary config into the module-level singleton once, here

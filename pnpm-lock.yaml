@@ -35,6 +35,9 @@ importers:
 
   packages/core:
     devDependencies:
+      '@dudousxd/nestjs-diagnostics':
+        specifier: ^0.2.0
+        version: 0.2.0
       '@nestjs/common':
         specifier: ^11.0.0
         version: 11.1.27(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -191,6 +194,10 @@ packages:
 
   '@changesets/write@0.4.0':
     resolution: {integrity: sha512-CdTLvIOPiCNuH71pyDu3rA+Q0n65cmAbXnwWH84rKGiFumFzkmHNT8KHTMEchcxN+Kl8I54xGUhJ7l3E7X396Q==}
+
+  '@dudousxd/nestjs-diagnostics@0.2.0':
+    resolution: {integrity: sha512-2jGsifkiX/6k5KJEy/fStZk4qGl+xF3kx+R/2erqcA24Cj8hiHfAFBicMHCl5qnDVice2o+JPr7sXtLcvOtg4g==}
+    engines: {node: '>=20'}
 
   '@esbuild/aix-ppc64@0.27.7':
     resolution: {integrity: sha512-EKX3Qwmhz1eMdEJokhALr0YiD0lhQNwDqkPYyPhiSwKrh7/4KRjQc04sZ8db+5DVVnZ1LmbNDI1uAMPEUBnQPg==}
@@ -1526,6 +1533,8 @@ snapshots:
       fs-extra: 7.0.1
       human-id: 4.2.0
       prettier: 2.8.8
+
+  '@dudousxd/nestjs-diagnostics@0.2.0': {}
 
   '@esbuild/aix-ppc64@0.27.7':
     optional: true
