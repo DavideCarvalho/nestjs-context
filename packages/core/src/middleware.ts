@@ -1,7 +1,7 @@
 import { Inject, Injectable, type NestMiddleware } from '@nestjs/common';
 import { Context, type ContextStore } from './context.js';
 import { CONTEXT_MODULE_OPTIONS } from './tokens.js';
-import { extractTraceparent, randomTraceId } from './traceparent.js';
+import { parseTraceparent, randomTraceId } from './traceparent.js';
 import type { ContextModuleOptions, ContextRequest } from './types.js';
 
 interface RequestLike extends ContextRequest {
@@ -29,8 +29,11 @@ export class ContextMiddleware implements NestMiddleware {
   use(req: RequestLike, _res: unknown, next: (err?: unknown) => void): void {
     const headers = req.headers ?? {};
     const traceHeader = this.options.traceHeader ?? 'traceparent';
-    const traceId =
-      this.options.traceId?.(req) ?? extractTraceparent(headers, traceHeader) ?? randomTraceId();
+    // Parse the upstream traceparent once: its trace-id seeds ours (unless a
+    // `traceId` hook overrides), and its span-id + flags are kept so we can
+    // re-emit a faithful downstream traceparent. See toTraceparent / DESIGN §5.
+    const upstream = parseTraceparent(headers, traceHeader);
+    const traceId = this.options.traceId?.(req) ?? upstream?.traceId ?? randomTraceId();
     const requestId = firstHeader(headers['x-request-id']);
 
     // Precedence (see DESIGN §4.1): merge the loosely-typed `initialize()` bag
@@ -49,8 +52,33 @@ export class ContextMiddleware implements NestMiddleware {
     if (requestId) {
       store.requestId = requestId;
     }
+    // Keep the upstream span-id/flags only when our trace-id is genuinely the
+    // upstream one (no `traceId` hook re-rooted the trace) — a parent-id from a
+    // different trace would be meaningless when re-emitted.
+    if (upstream && upstream.traceId === traceId) {
+      store.traceparent = upstream;
+    }
 
     Context.enterWith(store);
+
+    // Eager enrichers: derive fields from the now-assembled store (and the
+    // request) right after entering the context. Applied from the middleware's
+    // own options so this works whether or not the singleton was configured; a
+    // throwing enricher is isolated and never breaks the request.
+    const enrichers = this.options.enrichers;
+    if (enrichers && enrichers.length > 0) {
+      for (const enricher of enrichers) {
+        try {
+          const patch = enricher(store, req);
+          if (patch) {
+            Object.assign(store, patch);
+          }
+        } catch {
+          // An enricher must never break the request or the other enrichers.
+        }
+      }
+    }
+
     next();
   }
 }

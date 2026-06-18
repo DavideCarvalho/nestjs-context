@@ -6,6 +6,7 @@ import {
   ContextMiddleware,
   ContextModule,
   contextAccessor,
+  toTraceparent,
 } from '../src/index.js';
 
 describe('ContextModule.forRoot', () => {
@@ -64,6 +65,32 @@ describe('ContextMiddleware', () => {
     Context.run({ traceId: 'placeholder' }, () => {
       mw.use({ headers: { 'x-trace': traceparent } }, {}, () => {});
       expect(Context.traceId()).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    });
+  });
+
+  it('captures the upstream span-id + flags so toTraceparent re-emits faithfully', () => {
+    const mw = new ContextMiddleware({});
+    const incoming = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00';
+    Context.run({ traceId: 'placeholder' }, () => {
+      mw.use({ headers: { traceparent: incoming } }, {}, () => {});
+      const upstream = Context.get()?.traceparent;
+      expect(upstream).toEqual({
+        traceId: '4bf92f3577b34da6a3ce929d0e0e4736',
+        parentId: '00f067aa0ba902b7',
+        flags: '00',
+      });
+      // re-emitting continues the same trace, parent, and (not-)sampled decision
+      expect(toTraceparent(Context.traceId()!, upstream)).toBe(incoming);
+    });
+  });
+
+  it('drops the upstream traceparent when a traceId hook re-roots the trace', () => {
+    const mw = new ContextMiddleware({ traceId: () => 'f'.repeat(32) });
+    const incoming = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+    Context.run({ traceId: 'placeholder' }, () => {
+      mw.use({ headers: { traceparent: incoming } }, {}, () => {});
+      expect(Context.traceId()).toBe('f'.repeat(32));
+      expect(Context.get()?.traceparent).toBeUndefined();
     });
   });
 });
