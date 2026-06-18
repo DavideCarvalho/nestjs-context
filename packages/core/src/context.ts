@@ -1,5 +1,13 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomTraceId } from './traceparent.js';
+import {
+  type BaggageKeyMap,
+  decodeBaggage,
+  decodeUserRef,
+  encodeBaggage,
+  encodeUserRef,
+  resolveBaggageKeys,
+} from './baggage.js';
+import { type ParsedTraceparent, extractTraceparent, randomTraceId } from './traceparent.js';
 
 /**
  * Stable reference to a principal — `{ type, id }`, never the full user object.
@@ -29,6 +37,15 @@ export interface ContextStore {
   requestId?: string;
   userRef?: UserRef;
   tenantId?: string;
+  /**
+   * The parsed upstream `traceparent` (span-id + trace-flags), captured at
+   * request start. Lets a re-emitted `traceparent` faithfully continue the
+   * distributed trace — propagating the parent span-id and the upstream
+   * sampling decision — instead of fabricating a new one. Process-local only:
+   * intentionally NOT part of the default cross-process carrier. See
+   * {@link toTraceparent}.
+   */
+  traceparent?: ParsedTraceparent;
 }
 
 /**
@@ -51,6 +68,20 @@ export interface ContextCarrier {
 const als = new AsyncLocalStorage<ContextStore>();
 
 /**
+ * An enricher: a function that populates derived values onto the active context.
+ * Run eagerly by {@link Context.runEnrichers} (the middleware calls it right
+ * after entering the context). May either return a `Partial<ContextStore>` that
+ * is merged into the store, or mutate the passed `store` directly and return
+ * nothing. The optional `req` is forwarded from the middleware so an enricher
+ * can derive from request data. Errors thrown by one enricher are swallowed so
+ * they never break the request or the other enrichers.
+ */
+export type ContextEnricher = (
+  store: ContextStore,
+  req?: unknown,
+) => Partial<ContextStore> | undefined;
+
+/**
  * Configures the cross-boundary behaviour of the singleton. Comes from
  * `ContextModule.forRoot` (DI) but lands here once at module init via
  * {@link Context.configure}, because the singleton lives outside the container.
@@ -63,6 +94,21 @@ export interface ContextConfig {
   serialize?: (store: ContextStore) => ContextCarrier;
   /** Full override of {@link Context.deserialize}'s carrier→store step. */
   deserialize?: (carrier: ContextCarrier) => ContextStore;
+  /**
+   * Baggage key mapping for {@link Context.toBaggage}/{@link Context.fromBaggage}
+   * — the standards-compliant W3C `baggage` propagation option. Defaults to the
+   * field names (`tenantId`, `userRef`); set a custom key to namespace it, or
+   * `false` to never propagate that field over baggage. Independent of the
+   * bespoke {@link ContextCarrier} path, which is unaffected.
+   */
+  baggage?: BaggageKeyMap;
+  /**
+   * Eager enrichers run by {@link Context.runEnrichers} (which the middleware
+   * calls right after entering the context) to populate derived store fields —
+   * e.g. a `displayName` derived from `tenantId`, a region from a header. For
+   * values better computed on first use, prefer the lazy {@link Context.lazy}.
+   */
+  enrichers?: ContextEnricher[];
 }
 
 /**
@@ -82,11 +128,24 @@ let configured = false;
 function configsConflict(a: ContextConfig, b: ContextConfig): boolean {
   const carrierA = JSON.stringify(a.carrier);
   const carrierB = JSON.stringify(b.carrier);
-  return carrierA !== carrierB || a.serialize !== b.serialize || a.deserialize !== b.deserialize;
+  const baggageA = JSON.stringify(a.baggage);
+  const baggageB = JSON.stringify(b.baggage);
+  return (
+    carrierA !== carrierB ||
+    baggageA !== baggageB ||
+    a.serialize !== b.serialize ||
+    a.deserialize !== b.deserialize ||
+    // Enrichers are function arrays — compare by reference (same approach as the
+    // serialize/deserialize fns): a distinct array is treated as a config change.
+    a.enrichers !== b.enrichers
+  );
 }
 
 /** One-shot guard so the missing-traceId warning is not spammed per request. */
 let warnedMissingTraceId = false;
+
+/** One-shot guard so the out-of-context `set` warning is not spammed. */
+let warnedSetOutsideContext = false;
 
 function ensureTraceId(store: ContextStore): ContextStore {
   // A cross-process carrier may arrive missing/empty `traceId` (e.g. produced by
@@ -173,13 +232,59 @@ export const Context = {
 
   /**
    * Mutate a field on the active store (e.g. the auth guard sets `userRef`
-   * after the middleware already entered the context). No-op outside a context.
+   * after the middleware already entered the context).
+   *
+   * Outside an active context this is a no-op (kept backward-compatible — it
+   * never throws), but it emits a one-shot `console.warn`, because a silently
+   * dropped `set` is a common footgun: e.g. an auth guard calls
+   * `Context.set('userRef', …)` on a route the middleware was excluded from, so
+   * the value is lost without a trace. The warning fires once per process; call
+   * {@link Context.resetSetWarning} to re-arm it (primarily for tests).
    */
   set<K extends keyof ContextStore>(key: K, value: ContextStore[K]): void {
     const store = als.getStore();
     if (store) {
       store[key] = value;
+      return;
     }
+    if (!warnedSetOutsideContext) {
+      warnedSetOutsideContext = true;
+      console.warn(
+        `[nestjs-context] Context.set(${String(key)}, …) was called with no active context, so it was a no-op and the value was dropped. This usually means the code (e.g. an auth guard) ran on a path the ContextMiddleware did not cover, or outside any Context.run/enterWith scope. Ensure the context is established first. This warning fires once per process.`,
+      );
+    }
+  },
+
+  /** Re-arm the one-shot out-of-context `set` warning. Primarily for tests. */
+  resetSetWarning(): void {
+    warnedSetOutsideContext = false;
+  },
+
+  /**
+   * Snapshot the active context and return a wrapped `fn` that re-enters that
+   * snapshot every time it is later invoked — even outside any context. Mirrors
+   * `AsyncResource.bind` / nestjs-cls's snapshot helpers, and is the safe way to
+   * carry context across boundaries AsyncLocalStorage does not follow on its
+   * own: `setTimeout`/`setInterval`, `EventEmitter` listeners, and queue/job
+   * callbacks registered now but run later.
+   *
+   * Captures whatever is active at bind time (possibly nothing — then the bound
+   * fn runs with no active store). Arguments, `this`, and the return value all
+   * pass through unchanged.
+   *
+   * ```ts
+   * emitter.on('done', Context.bind(() => log(Context.traceId())));
+   * setTimeout(Context.bind(handler), 1000);
+   * ```
+   */
+  bind<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+    const snapshot = als.getStore();
+    if (snapshot === undefined) {
+      return fn;
+    }
+    return function (this: unknown, ...args: A): R {
+      return als.run(snapshot, () => fn.apply(this, args));
+    };
   },
 
   traceId(): string | undefined {
@@ -225,6 +330,12 @@ export const Context = {
     if (next.deserialize !== undefined) {
       replacement.deserialize = next.deserialize;
     }
+    if (next.baggage !== undefined) {
+      replacement.baggage = next.baggage;
+    }
+    if (next.enrichers !== undefined) {
+      replacement.enrichers = next.enrichers;
+    }
 
     if (configured && configsConflict(config, replacement)) {
       console.warn(
@@ -262,5 +373,137 @@ export const Context = {
   /** Re-hydrate a context from a carrier and run `fn` inside it. */
   deserialize<T>(carrier: ContextCarrier, fn: () => T): T {
     return als.run(fromCarrier(carrier), fn);
+  },
+
+  /**
+   * Build a W3C `baggage` header value from the active context, or `undefined`
+   * when there is no context or no mappable field. This is the standards-
+   * compliant propagation option: instead of (or alongside) the bespoke
+   * {@link ContextCarrier}, the context can ride a real `baggage` header that any
+   * W3C-baggage-aware peer (OTel SDKs, gateways) understands.
+   *
+   * By default maps `tenantId` and `userRef` (`userRef` as a compact `type:id`
+   * token); tune the keys — or disable a field — via the `baggage` config (see
+   * {@link ContextConfig}). The bespoke carrier path is unaffected.
+   */
+  toBaggage(): string | undefined {
+    const store = als.getStore();
+    if (!store) {
+      return undefined;
+    }
+    const keys = resolveBaggageKeys(config.baggage);
+    const entries: Record<string, string> = {};
+    if (keys.tenantId !== false && store.tenantId !== undefined) {
+      entries[keys.tenantId] = store.tenantId;
+    }
+    if (keys.userRef !== false && store.userRef !== undefined) {
+      entries[keys.userRef] = encodeUserRef(store.userRef);
+    }
+    const header = encodeBaggage(entries);
+    return header === '' ? undefined : header;
+  },
+
+  /**
+   * Re-hydrate a context from a W3C `baggage` header (the symmetric counterpart
+   * of {@link toBaggage}) and run `fn` inside it. Tolerant of a malformed/absent
+   * header — it simply yields a context with those fields unset.
+   *
+   * Baggage carries no trace-id, so the `traceId` invariant is satisfied from
+   * `opts.traceparent` (a W3C `traceparent` header value, when supplied and
+   * valid) else a freshly generated id — mirroring the middleware's seeding.
+   */
+  fromBaggage<T>(
+    header: string | string[] | undefined,
+    fn: () => T,
+    opts?: { traceparent?: string },
+  ): T {
+    const keys = resolveBaggageKeys(config.baggage);
+    const decoded = decodeBaggage(header);
+
+    const traceId =
+      (opts?.traceparent !== undefined
+        ? extractTraceparent({ traceparent: opts.traceparent })
+        : undefined) ?? randomTraceId();
+
+    const store: ContextStore = { traceId };
+    if (keys.tenantId !== false) {
+      const tenantId = decoded[keys.tenantId];
+      if (tenantId !== undefined) {
+        store.tenantId = tenantId;
+      }
+    }
+    if (keys.userRef !== false) {
+      const token = decoded[keys.userRef];
+      if (token !== undefined) {
+        const userRef = decodeUserRef(token);
+        if (userRef !== undefined) {
+          store.userRef = userRef;
+        }
+      }
+    }
+    return als.run(store, fn);
+  },
+
+  /**
+   * Run the configured eager {@link ContextConfig.enrichers} against the active
+   * store, merging each one's returned `Partial<ContextStore>` (or letting it
+   * mutate the store directly). The middleware calls this right after entering
+   * the context, but it can also be invoked from non-HTTP entrypoints after a
+   * `Context.run`/`enterWith`.
+   *
+   * No-op (never throws) when there is no active context or no enrichers. A
+   * throwing enricher is isolated — it neither breaks the caller nor the
+   * remaining enrichers.
+   */
+  runEnrichers(req?: unknown): void {
+    const store = als.getStore();
+    if (!store) {
+      return;
+    }
+    const enrichers = config.enrichers;
+    if (enrichers === undefined || enrichers.length === 0) {
+      return;
+    }
+    for (const enricher of enrichers) {
+      try {
+        const patch = enricher(store, req);
+        if (patch) {
+          Object.assign(store, patch);
+        }
+      } catch {
+        // An enricher must never break the request or the other enrichers.
+      }
+    }
+  },
+
+  /**
+   * Lazily compute a derived store field on first access and memoize it onto the
+   * active store, so subsequent reads (this request) are free. The on-demand
+   * counterpart to eager {@link runEnrichers} — use it for values that are
+   * expensive or rarely needed.
+   *
+   * If the field is already present on the store, its value is returned and the
+   * factory is not called. Returns `undefined` outside any context (nowhere to
+   * cache). The factory runs at most once per store per key.
+   *
+   * ```ts
+   * const name = Context.lazy('displayName', (s) => lookupName(s.userRef));
+   * ```
+   */
+  lazy<K extends keyof ContextStore>(
+    key: K,
+    factory: (store: ContextStore) => NonNullable<ContextStore[K]>,
+  ): ContextStore[K] | undefined {
+    const store = als.getStore();
+    if (!store) {
+      return undefined;
+    }
+    const existing = store[key];
+    if (existing !== undefined) {
+      return existing;
+    }
+    const value = factory(store);
+    store[key] = value;
+    return value;
   },
 };

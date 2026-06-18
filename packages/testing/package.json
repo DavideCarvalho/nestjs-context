@@ -20,6 +20,8 @@
     }
   },
   "files": ["dist/", "README.md", "CHANGELOG.md"],
+  "//sideEffects": "Safe to be false: this package has NO module-level side effects — only type exports and pure function declarations (runWithContext/enterContext), which call into Context only at runtime, never at import. Enables tree-shaking for consumers. The imported @dudousxd/nestjs-context keeps its own sideEffects field, so its Symbol.for/singleton modules are still retained.",
+  "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",

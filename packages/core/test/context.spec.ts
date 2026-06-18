@@ -11,8 +11,33 @@ describe('Context', () => {
   });
 
   it('set is a no-op outside any context (does not throw)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(() => Context.set('tenantId', 't1')).not.toThrow();
     expect(Context.tenantId()).toBeUndefined();
+    warn.mockRestore();
+  });
+
+  it('set outside any context warns (visible footgun) but stays a no-op', () => {
+    Context.resetSetWarning();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    Context.set('userRef', { type: 'user', id: 1 });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain('[nestjs-context]');
+    expect(warn.mock.calls[0]?.[0]).toContain('userRef');
+    // one-shot: a second out-of-context set does not spam
+    Context.set('tenantId', 't1');
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it('set inside a context does not warn', () => {
+    Context.resetSetWarning();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    Context.run({ traceId: 'x' }, () => {
+      Context.set('tenantId', 't1');
+    });
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('run exposes the active store and unwinds after', () => {
@@ -113,6 +138,52 @@ describe('Context serialize/deserialize', () => {
       expect(Context.tenantId()).toBeUndefined();
       expect(Context.userRef()).toBeUndefined();
     });
+  });
+});
+
+describe('Context.bind', () => {
+  it('re-enters the captured context when the bound fn runs later outside it', async () => {
+    let bound: (() => ContextStore | undefined) | undefined;
+    Context.run({ traceId: 'snap', tenantId: 'tn' }, () => {
+      bound = Context.bind(() => Context.get());
+    });
+    // Outside any context now.
+    expect(Context.get()).toBeUndefined();
+    const seen = await new Promise<ContextStore | undefined>((resolve) => {
+      setTimeout(() => resolve(bound!()), 0);
+    });
+    expect(seen?.traceId).toBe('snap');
+    expect(seen?.tenantId).toBe('tn');
+  });
+
+  it('forwards arguments and the return value', () => {
+    const bound = Context.run({ traceId: 'x' }, () =>
+      Context.bind((a: number, b: number) => a + b + (Context.traceId() === 'x' ? 0 : 100)),
+    );
+    expect(bound(2, 3)).toBe(5);
+  });
+
+  it('preserves `this` when invoked as a method', () => {
+    const obj = {
+      val: 42,
+      run: Context.run({ traceId: 'x' }, () =>
+        Context.bind(function (this: { val: number }) {
+          return this.val;
+        }),
+      ),
+    };
+    expect(obj.run()).toBe(42);
+  });
+
+  it('captures no context when bound outside one (runs with no active store)', () => {
+    const bound = Context.bind(() => Context.get());
+    expect(bound()).toBeUndefined();
+  });
+
+  it('binds the snapshot at bind time, independent of later context', () => {
+    const bound = Context.run({ traceId: 'first' }, () => Context.bind(() => Context.traceId()));
+    const seen = Context.run({ traceId: 'second' }, () => bound());
+    expect(seen).toBe('first');
   });
 });
 

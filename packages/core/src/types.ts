@@ -1,4 +1,6 @@
-import type { ContextCarrier, ContextStore } from './context.js';
+import type { Type } from '@nestjs/common';
+import type { BaggageKeyMap } from './baggage.js';
+import type { ContextCarrier, ContextEnricher, ContextStore } from './context.js';
 
 // (cross-process serialize config lives on the singleton — see ContextConfig in context.ts)
 
@@ -34,6 +36,17 @@ export interface ContextModuleOptions {
    */
   initialize?: (req: ContextRequest) => Partial<ContextStore>;
 
+  /**
+   * Eager enrichers run by the middleware right after it enters the context (and
+   * after `initialize`), to populate DERIVED store fields — e.g. a `displayName`
+   * from `tenantId`. Unlike `initialize`, each enricher sees the assembled store
+   * and may either return a `Partial<ContextStore>` to merge or mutate the store
+   * in place. For values better computed on demand, prefer `Context.lazy`.
+   * `forRoot` also pushes these onto the singleton so non-HTTP entrypoints can
+   * call `Context.runEnrichers()` themselves.
+   */
+  enrichers?: ContextEnricher[];
+
   // — entrypoint (DESIGN §4.1 level 3) —
 
   /**
@@ -63,4 +76,40 @@ export interface ContextModuleOptions {
 
   /** Full override of how a carrier is re-hydrated into a store. */
   deserialize?: (carrier: ContextCarrier) => ContextStore;
+
+  /**
+   * Baggage key mapping for `Context.toBaggage()`/`Context.fromBaggage()` — the
+   * standards-compliant W3C `baggage` propagation option. Defaults to the field
+   * names (`tenantId`, `userRef`); set a custom key to namespace it, or `false`
+   * to never propagate that field over baggage. Independent of the bespoke
+   * carrier above.
+   */
+  baggage?: BaggageKeyMap;
+}
+
+/**
+ * Implement this to supply {@link ContextModuleOptions} from a DI provider —
+ * the `useClass` / `useExisting` arm of {@link ContextModule.forRootAsync}.
+ */
+export interface ContextModuleOptionsFactory {
+  createContextOptions(): Promise<ContextModuleOptions> | ContextModuleOptions;
+}
+
+/**
+ * Options for {@link ContextModule.forRootAsync}: resolve {@link ContextModuleOptions}
+ * lazily through DI (e.g. from a `ConfigService`). Mirrors the ecosystem
+ * convention (`nestjs-filter`, `nestjs-authz`) — supply exactly one of
+ * `useFactory` / `useClass` / `useExisting`.
+ */
+export interface ContextModuleAsyncOptions {
+  /** Modules whose exported providers the factory may `inject`. */
+  imports?: unknown[];
+  /** Factory returning the resolved options; its args come from `inject`. */
+  useFactory?: (...args: unknown[]) => Promise<ContextModuleOptions> | ContextModuleOptions;
+  /** Providers to inject (in order) into `useFactory`. */
+  inject?: unknown[];
+  /** A class implementing {@link ContextModuleOptionsFactory}, instantiated by Nest. */
+  useClass?: Type<ContextModuleOptionsFactory>;
+  /** An existing provider implementing {@link ContextModuleOptionsFactory}. */
+  useExisting?: Type<ContextModuleOptionsFactory>;
 }

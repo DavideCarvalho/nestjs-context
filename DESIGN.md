@@ -30,7 +30,8 @@ export const Context = {
   run<T>(store: ContextStore, fn: () => T): T { return als.run(store, fn); },
   enterWith(store: ContextStore): void { als.enterWith(store); },  // sobrevive ao return do middleware
   get(): ContextStore | undefined { return als.getStore(); },
-  set<K extends keyof ContextStore>(k: K, v: ContextStore[K]): void { const s = als.getStore(); if (s) s[k] = v; },
+  set<K extends keyof ContextStore>(k: K, v: ContextStore[K]): void { const s = als.getStore(); if (s) s[k] = v; /* fora de contexto: no-op + console.warn one-shot (footgun visível); Context.resetSetWarning() re-arma */ },
+  bind<A extends unknown[], R>(fn: (...a: A) => R): (...a: A) => R { /* snapshot do contexto atual; re-entra a cada chamada posterior (setTimeout/EventEmitter/fila). Espelha AsyncResource.bind / nestjs-cls */ },
   traceId: () => als.getStore()?.traceId,
   tenantId: () => als.getStore()?.tenantId,
   userRef: () => als.getStore()?.userRef,
@@ -142,7 +143,8 @@ ContextModule.forRoot({ carrier: ['traceId','tenantId','userRef','locale'] });
 ALS não atravessa processo/fila/durable sozinho. `serialize()` → carrier plano `{ traceId, tenantId, userRef }` (nada de user/conexão). A integração mora **no lado de quem já produz o boundary**, guardada por detecção opcional — **não** em pacotes-ponte `nestjs-context-bullmq`/`-durable` que o dev instale:
 
 - **BullMQ** (dentro do dispatcher de quem enfileira): `queue.add(name, { ...payload, __ctx: Context.serialize() })`; no worker `Context.deserialize(job.data.__ctx, () => handler(job))`.
-- **Durable**: liga no gancho que **já existe** — `WorkflowEngine({ traceparent: () => toTraceparent(Context.traceId()) })`; `RemoteTask` carrega o carrier; worker (incl. Python) re-hidrata. (PR no durable p/ carrier levar tenant/userRef além do traceparent.)
+- **Durable**: liga no gancho que **já existe** — `WorkflowEngine({ traceparent: () => toTraceparent(Context.traceId(), Context.get()?.traceparent) })`; `RemoteTask` carrega o carrier; worker (incl. Python) re-hidrata. (PR no durable p/ carrier levar tenant/userRef além do traceparent.)
+  - `toTraceparent(traceId, upstream?)` **propaga fielmente** o trace distribuído: quando há `upstream` (o `traceparent` recebido, parseado por `parseTraceparent` no middleware e guardado em `ContextStore.traceparent`), re-emite o **mesmo parent span-id** e as **trace-flags originais** (um `-00` não-amostrado entra e sai `-00`). Sem upstream (trace genuinamente novo), gera parent-id aleatório e `-01` (amostrado). O campo `traceparent` é **process-local** (não entra no carrier default).
 
 > Pegadinha a documentar: workflow de dias — o user/tenant do carrier é o de quando **disparou**; se mudou, o step re-hidrata o histórico, não o atual. Decisão: carrier é snapshot, não live.
 
