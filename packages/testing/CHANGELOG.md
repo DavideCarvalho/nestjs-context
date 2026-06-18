@@ -1,5 +1,12 @@
 # @dudousxd/nestjs-context-testing
 
+## 1.0.0
+
+### Patch Changes
+
+- Updated dependencies [[`d7d038c`](https://github.com/DavideCarvalho/nestjs-context/commit/d7d038c339eb4fdbdf01c0dd4b10a8b9df4a6fe9)]:
+  - @dudousxd/nestjs-context@1.0.0
+
 ## 0.2.0
 
 ### Patch Changes
