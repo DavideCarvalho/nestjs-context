@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-context
 
+## 1.0.1
+
+### Patch Changes
+
+- [`693b19b`](https://github.com/DavideCarvalho/nestjs-context/commit/693b19b30920d3f3c28329ab879a49650ef53a79) - Register `context:accessor` as a typed capability in the ecosystem protocol's `CapabilityRegistry` (type-only augmentation) and add a conformance test (`assertCapabilityNaming`) that locks the canonical token naming. `@dudousxd/nestjs-diagnostics` stays an OPTIONAL peer — no runtime dependency added; context still works standalone.
+
 ## 1.0.0
 
 ### Minor Changes
