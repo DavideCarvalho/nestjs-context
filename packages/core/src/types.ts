@@ -113,3 +113,12 @@ export interface ContextModuleAsyncOptions {
   /** An existing provider implementing {@link ContextModuleOptionsFactory}. */
   useExisting?: Type<ContextModuleOptionsFactory>;
 }
+
+// — capability registry (type-only; no runtime import of diagnostics) —
+import type { ContextAccessor } from './accessor.js';
+
+declare module '@dudousxd/nestjs-diagnostics' {
+  interface CapabilityRegistry {
+    context: { accessor: ContextAccessor };
+  }
+}
