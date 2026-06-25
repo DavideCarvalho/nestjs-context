@@ -19,7 +19,7 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist/", "README.md", "CHANGELOG.md"],
+  "files": ["dist/", "README.md", "CHANGELOG.md", "skills"],
   "//sideEffects": "NOT false: tokens.ts registers process-global symbols via Symbol.for() AT IMPORT TIME — the cross-package DI token channel other ecosystem libs reference. context.ts holds the module-level singleton (AsyncLocalStorage + cross-boundary config) that non-DI entrypoints (queue/durable workers) rely on being one shared instance. A bundler told sideEffects:false could tree-shake these initializers, breaking token identity / singleton sharing. The array lists exactly those modules (src + published dist paths); pure modules (index, accessor, middleware, etc.) stay tree-shakeable. Decorator/metadata-bearing classes are reached through value imports, so they are never dropped.",
   "sideEffects": ["**/tokens.js", "**/tokens.ts", "**/context.js", "**/context.ts"],
   "scripts": {
@@ -44,6 +44,7 @@
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/testing": "^11.0.0",
+    "@tanstack/intent": "^0.3.2",
     "@types/node": "^20.0.0",
     "reflect-metadata": "^0.2.2",
     "typescript": "^5.4.0",
@@ -52,5 +53,13 @@
   "engines": {
     "node": ">=20"
   },
-  "keywords": ["nestjs", "context", "async-local-storage", "als", "trace", "tenant"]
+  "keywords": [
+    "nestjs",
+    "context",
+    "async-local-storage",
+    "als",
+    "trace",
+    "tenant",
+    "tanstack-intent"
+  ]
 }

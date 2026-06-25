@@ -1,0 +1,33 @@
+# Skill tree for nestjs-context. Flat, all type:core, each entry carries a `package` field.
+library: '@dudousxd/nestjs-context'
+structure: flat
+skills:
+  - name: context-setup
+    package: '@dudousxd/nestjs-context'
+    path: packages/core/skills/context-setup/SKILL.md
+    type: core
+    description: Wire ContextModule.forRoot/forRootAsync, the middleware, and non-HTTP entrypoints.
+
+  - name: reading-context
+    package: '@dudousxd/nestjs-context'
+    path: packages/core/skills/reading-context/SKILL.md
+    type: core
+    description: Read/set the store, fill userRef in the auth guard, inject CONTEXT_ACCESSOR.
+
+  - name: cross-boundary
+    package: '@dudousxd/nestjs-context'
+    path: packages/core/skills/cross-boundary/SKILL.md
+    type: core
+    description: Carry context across queue/durable/timer boundaries via carrier, bind, baggage, traceparent.
+
+  - name: custom-fields
+    package: '@dudousxd/nestjs-context'
+    path: packages/core/skills/custom-fields/SKILL.md
+    type: core
+    description: Add typed store fields (augmentation), populate via initialize/enrichers/lazy.
+
+  - name: context-testing
+    package: '@dudousxd/nestjs-context-testing'
+    path: packages/testing/skills/context-testing/SKILL.md
+    type: core
+    description: Run code inside a fake context store in tests with runWithContext/enterContext.

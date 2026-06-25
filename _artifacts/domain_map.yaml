@@ -1,0 +1,163 @@
+# Domain map for nestjs-context — produced autonomously (no maintainer interview).
+# One map for the whole monorepo. Source-grounded against packages/*/src.
+library: '@dudousxd/nestjs-context'
+repo: DavideCarvalho/nestjs-context
+version: 0.2.0
+summary: >
+  Shared AsyncLocalStorage (ALS) context for NestJS that carries
+  traceId/requestId/userRef/tenantId across a request and across the wider
+  ecosystem (queue workers, durable workflows, ORM subscribers). The store is a
+  module-level singleton (outside the DI container on purpose) so non-DI
+  entrypoints can read it. Plumbing library: the app wires it once
+  (ContextModule.forRoot) and other libs consume it via an optional global token.
+
+packages:
+  - name: '@dudousxd/nestjs-context'
+    dir: packages/core
+    role: primary client-facing module (ALS + middleware + module + carrier/baggage/traceparent)
+    public: true
+  - name: '@dudousxd/nestjs-context-testing'
+    dir: packages/testing
+    role: test helper to run code inside a fake context store
+    public: true
+
+primary_exports:
+  context_singleton:  # packages/core/src/context.ts
+    object: Context
+    methods:
+      - run(store, fn)
+      - enterWith(store)
+      - get()
+      - set(key, value)            # one-shot warn when out of context
+      - resetSetWarning()
+      - bind(fn)                   # snapshot + re-enter (setTimeout/EventEmitter/queue)
+      - traceId() / tenantId() / userRef()
+      - configure(config)          # process-global; called by forRoot
+      - resetConfig()
+      - serialize() -> ContextCarrier | undefined
+      - deserialize(carrier, fn)
+      - toBaggage() -> string | undefined
+      - fromBaggage(header, fn, { traceparent })
+      - runEnrichers(req?)
+      - lazy(key, factory)
+    types: [ContextStore, ContextCarrier, ContextConfig, ContextEnricher, UserRef]
+  module:  # packages/core/src/module.ts
+    class: ContextModule
+    statics: [forRoot(options), forRootAsync(asyncOptions)]
+    notes: global module; registers ContextMiddleware unless autoMiddleware:false
+  middleware:  # packages/core/src/middleware.ts
+    class: ContextMiddleware
+    notes: uses enterWith (not run) so context survives middleware return
+  tokens:  # packages/core/src/tokens.ts
+    - CONTEXT_ACCESSOR    # Symbol.for('@dudousxd/nestjs-context:accessor')
+    - CONTEXT_MODULE_OPTIONS
+  accessor:  # packages/core/src/accessor.ts
+    export: contextAccessor
+    type: ContextAccessor   # narrow read-only: traceId/tenantId/userRef/get
+  traceparent:  # packages/core/src/traceparent.ts
+    - extractTraceparent(headers, headerName?)
+    - parseTraceparent(headers, headerName?)
+    - randomTraceId()
+    - toTraceparent(traceId, upstream?)
+    - ParsedTraceparent
+  baggage:  # packages/core/src/baggage.ts
+    - encodeBaggage / decodeBaggage
+    - encodeUserRef / decodeUserRef
+    - BaggageKeyMap
+  testing:  # packages/testing/src/index.ts
+    - runWithContext(partial, fn)
+    - enterContext(partial)
+    - PartialContextStore
+
+options:  # ContextModuleOptions — packages/core/src/types.ts
+  traceHeader: "header to read trace id from; default 'traceparent'"
+  traceId: "(req) => string — override trace id generation"
+  initialize: "(req) => Partial<ContextStore> — merged FIRST, traceId/requestId still win"
+  enrichers: "ContextEnricher[] — run by middleware after entering context"
+  autoMiddleware: "default true; false = app owns context creation (non-HTTP)"
+  forRoutes: "default ['*']"
+  exclude: "routes without context"
+  carrier: "(keyof ContextStore)[] — fields serialize() includes; default traceId/tenantId/userRef"
+  serialize / deserialize: "full overrides of the carrier round-trip"
+  baggage: "BaggageKeyMap — W3C baggage key mapping (or false to disable a field)"
+
+domains:
+  - id: setup
+    skill: context-setup
+    package: '@dudousxd/nestjs-context'
+    covers: install, ContextModule.forRoot/forRootAsync, global module, middleware,
+      autoMiddleware/forRoutes/exclude, non-HTTP entrypoints (Context.run/enterWith), basic reads
+  - id: reading
+    skill: reading-context
+    package: '@dudousxd/nestjs-context'
+    covers: Context.get/set/traceId/tenantId/userRef, setting userRef in auth guard,
+      out-of-context set footgun, CONTEXT_ACCESSOR @Optional injection, ContextAccessor
+  - id: cross-boundary
+    skill: cross-boundary
+    package: '@dudousxd/nestjs-context'
+    covers: serialize/deserialize carrier, Context.bind, baggage toBaggage/fromBaggage,
+      traceparent parse/toTraceparent, carrier config, process-global config/resetConfig
+  - id: custom-fields
+    skill: custom-fields
+    package: '@dudousxd/nestjs-context'
+    covers: ContextStore module augmentation, initialize hook, enrichers, Context.lazy
+  - id: testing
+    skill: context-testing
+    package: '@dudousxd/nestjs-context-testing'
+    covers: runWithContext, enterContext, PartialContextStore
+
+failure_modes:
+  - id: run-vs-enterWith
+    severity: HIGH
+    detail: Context.run loses the store after the callback returns; the middleware uses
+      enterWith so the context reaches the async handler/guard/interceptor. Using run in a
+      middleware drops context for the rest of the request.
+    source: packages/core/src/middleware.ts; DESIGN.md §3
+  - id: set-outside-context
+    severity: HIGH
+    detail: Context.set is a no-op (and emits a one-shot warn) when there is no active
+      context — e.g. an auth guard on a route the middleware excluded. The value is dropped silently.
+    source: packages/core/src/context.ts:244
+  - id: bind-needed-for-async-escape
+    severity: HIGH
+    detail: ALS does not follow setTimeout/EventEmitter/queue callbacks registered now and run
+      later. Reading Context.* inside them returns undefined unless wrapped with Context.bind.
+    source: packages/core/src/context.ts:280
+  - id: full-user-not-ref
+    severity: MEDIUM
+    detail: Store userRef as { type, id }, never the full user entity — the store must stay
+      serializable to cross the queue/durable boundary.
+    source: packages/core/src/context.ts:17; DESIGN.md §2
+  - id: custom-field-not-in-carrier
+    severity: MEDIUM
+    detail: A module-augmented custom field is NOT serialized across a boundary unless added to
+      the carrier list (default carrier is only traceId/tenantId/userRef).
+    source: packages/core/src/context.ts:182; types.ts carrier
+  - id: process-global-config
+    severity: MEDIUM
+    detail: ContextModule.forRoot config is process-global and replaced wholesale; a 2nd forRoot
+      with a different config warns. Tests must call Context.resetConfig() between cases.
+    source: packages/core/src/context.ts:318; module-async.spec.ts
+  - id: optional-token-injection
+    severity: MEDIUM
+    detail: Consumer libs must inject CONTEXT_ACCESSOR with @Optional() @Inject so they degrade
+      cleanly when nestjs-context is absent; a plain @Inject throws when unresolved.
+    source: packages/core/src/tokens.ts; DESIGN.md §6
+  - id: testing-no-reset
+    severity: MEDIUM
+    detail: runWithContext changes process-global behaviour only via Context.run scope, but tests
+      touching forRoot/configure must resetConfig() in afterEach to avoid bleed.
+    source: packages/testing/src/index.ts; module-async.spec.ts
+
+gaps:
+  # What a maintainer interview would have answered but was unavailable autonomously.
+  - GitHub issues/discussions were not reachable (gh search returned nothing); no
+    issue-sourced failure modes could be mined — all failure modes are source/DESIGN-derived.
+  - No docs/ directory and the published README only links to an external Aviary docs
+    site (not in-repo), so prose-level "production knowledge" beyond DESIGN.md is inferred.
+  - Relative priority of the four core domains for an AI agent (which skill is loaded most)
+    is a guess; setup + reading are treated as the highest-traffic.
+  - Exact downstream consumer integrations (audit/filter/telescope/durable) are described in
+    DESIGN.md as roadmap; only the CONTEXT_ACCESSOR contract is grounded here, not the consumers' code.
+  - The diagnostics bridge (wireContextIntoDiagnostics) targets an optional peer
+    @dudousxd/nestjs-diagnostics; its event-shape contract is out of this repo's scope.
