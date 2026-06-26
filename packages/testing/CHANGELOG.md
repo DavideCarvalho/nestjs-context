@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-context-testing
 
+## 1.0.2
+
+### Patch Changes
+
+- [#8](https://github.com/DavideCarvalho/nestjs-context/pull/8) [`680aa63`](https://github.com/DavideCarvalho/nestjs-context/commit/680aa63731982560cccb12a7ab5b19a355cdb051) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Ship TanStack Intent agent skills (SKILL.md) inside the package.
+
 ## 1.0.0
 
 ### Patch Changes
