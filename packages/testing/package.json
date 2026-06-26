@@ -19,7 +19,7 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist/", "README.md", "CHANGELOG.md"],
+  "files": ["dist/", "README.md", "CHANGELOG.md", "skills"],
   "//sideEffects": "Safe to be false: this package has NO module-level side effects — only type exports and pure function declarations (runWithContext/enterContext), which call into Context only at runtime, never at import. Enables tree-shaking for consumers. The imported @dudousxd/nestjs-context keeps its own sideEffects field, so its Symbol.for/singleton modules are still retained.",
   "sideEffects": false,
   "scripts": {
@@ -33,6 +33,7 @@
   },
   "devDependencies": {
     "@dudousxd/nestjs-context": "workspace:*",
+    "@tanstack/intent": "^0.3.2",
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0",
     "vitest": "^3.0.0"
@@ -40,5 +41,5 @@
   "engines": {
     "node": ">=20"
   },
-  "keywords": ["nestjs", "context", "testing", "async-local-storage"]
+  "keywords": ["nestjs", "context", "testing", "async-local-storage", "tanstack-intent"]
 }
