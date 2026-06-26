@@ -1,5 +1,13 @@
 # @dudousxd/nestjs-context
 
+## 1.0.2
+
+### Patch Changes
+
+- [#8](https://github.com/DavideCarvalho/nestjs-context/pull/8) [`680aa63`](https://github.com/DavideCarvalho/nestjs-context/commit/680aa63731982560cccb12a7ab5b19a355cdb051) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Ship TanStack Intent agent skills (SKILL.md) inside the package.
+
+- [#8](https://github.com/DavideCarvalho/nestjs-context/pull/8) [`013b074`](https://github.com/DavideCarvalho/nestjs-context/commit/013b07484643867e0183759cc08f393ecbb97ea8) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - fix: sync the exported `VERSION` const with package.json at release time. The plain `tsc` build does no version injection and `changeset version` only bumps package.json, so the hard-coded `VERSION` in `src/index.ts` could ship stale (it was `0.1.0-alpha.0` while the package was `0.2.0`). Corrected the literal and added `scripts/sync-version.mjs`, chained into `version-packages` to re-sync on every bump, with a `--check` guard in `release` that fails the publish on drift.
+
 ## 1.0.1
 
 ### Patch Changes
