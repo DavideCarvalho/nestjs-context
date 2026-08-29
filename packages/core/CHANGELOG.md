@@ -1,5 +1,15 @@
 # @dudousxd/nestjs-context
 
+## 1.0.3
+
+### Patch Changes
+
+- [`cd69557`](https://github.com/DavideCarvalho/nestjs-context/commit/cd695574b9cf0cefc85ccdfb495d02551230a2ac) - Support NestJS 12.
+
+  The `@nestjs/common` / `@nestjs/core` peer ranges are already `>=10.0.0`, so they
+  admit 12 unchanged. The dev/test matrix now runs on `@nestjs/*@12.0.1`, so v12 is
+  covered by CI rather than merely allowed by the range. No source changes were needed.
+
 ## 1.0.2
 
 ### Patch Changes
