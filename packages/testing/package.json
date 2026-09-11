@@ -33,7 +33,7 @@
   },
   "devDependencies": {
     "@dudousxd/nestjs-context": "workspace:*",
-    "@tanstack/intent": "^0.3.2",
+    "@tanstack/intent": "^0.4.0",
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0",
     "vitest": "^3.2.6"
