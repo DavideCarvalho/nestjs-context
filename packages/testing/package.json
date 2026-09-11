@@ -36,7 +36,7 @@
     "@tanstack/intent": "0.4.0",
     "@types/node": "20.19.43",
     "typescript": "5.9.3",
-    "vitest": "3.2.6"
+    "vitest": "3.2.7"
   },
   "engines": {
     "node": ">=20"
