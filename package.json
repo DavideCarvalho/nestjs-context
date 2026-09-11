@@ -26,13 +26,13 @@
     "release": "node scripts/sync-version.mjs --check && pnpm --filter './packages/*' build && changeset publish"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.0",
-    "@changesets/changelog-github": "^0.7.0",
-    "@changesets/cli": "^2.31.0",
-    "@swc/core": "^1.16.2",
-    "turbo": "^2.10.12",
-    "typescript": "^5.4.0",
-    "unplugin-swc": "^1.6.0",
-    "vitest": "^3.2.6"
+    "@biomejs/biome": "1.9.4",
+    "@changesets/changelog-github": "0.7.0",
+    "@changesets/cli": "2.31.0",
+    "@swc/core": "1.16.2",
+    "turbo": "2.10.12",
+    "typescript": "5.9.3",
+    "unplugin-swc": "1.6.0",
+    "vitest": "3.2.6"
   }
 }
