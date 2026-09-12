@@ -8,6 +8,17 @@
     "url": "git+https://github.com/DavideCarvalho/nestjs-context.git",
     "directory": "packages/testing"
   },
+  "homepage": "https://davidecarvalho.github.io/aviary/docs/context",
+  "bugs": {
+    "url": "https://github.com/DavideCarvalho/nestjs-context/issues"
+  },
+  "keywords": [
+    "nestjs",
+    "context",
+    "testing",
+    "async-local-storage",
+    "tanstack-intent"
+  ],
   "author": "Davi Carvalho <davi@goflip.ai>",
   "type": "module",
   "main": "./dist/index.js",
@@ -19,7 +30,12 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist/", "README.md", "CHANGELOG.md", "skills"],
+  "files": [
+    "dist/",
+    "README.md",
+    "CHANGELOG.md",
+    "skills"
+  ],
   "//sideEffects": "Safe to be false: this package has NO module-level side effects — only type exports and pure function declarations (runWithContext/enterContext), which call into Context only at runtime, never at import. Enables tree-shaking for consumers. The imported @dudousxd/nestjs-context keeps its own sideEffects field, so its Symbol.for/singleton modules are still retained.",
   "sideEffects": false,
   "scripts": {
@@ -40,6 +56,5 @@
   },
   "engines": {
     "node": ">=20"
-  },
-  "keywords": ["nestjs", "context", "testing", "async-local-storage", "tanstack-intent"]
+  }
 }
