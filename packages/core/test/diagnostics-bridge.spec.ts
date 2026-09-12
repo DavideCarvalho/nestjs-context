@@ -1,7 +1,7 @@
 import diagnostics_channel from 'node:diagnostics_channel';
 import {
-  type DiagnosticEvent,
   channelName,
+  type DiagnosticEvent,
   emit,
   getContextAccessor,
   resolveTraceId,

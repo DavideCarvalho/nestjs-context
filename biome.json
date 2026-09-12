@@ -1,9 +1,9 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.0/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.12/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "ignoreUnknown": false,
-    "ignore": ["dist/**", "node_modules/**", ".turbo/**", "coverage/**"]
+    "includes": ["**", "!**/dist", "!**/node_modules", "!**/.turbo", "!**/coverage"]
   },
   "formatter": {
     "enabled": true,
@@ -18,7 +18,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "complexity": { "noBannedTypes": "off", "noStaticOnlyClass": "off" },
       "style": { "noNonNullAssertion": "off", "useImportType": "off" },
       "suspicious": {
@@ -29,7 +29,7 @@
   },
   "overrides": [
     {
-      "include": ["**/test/**"],
+      "includes": ["**/test/**"],
       "linter": {
         "rules": {
           "suspicious": { "noExplicitAny": "off" }
