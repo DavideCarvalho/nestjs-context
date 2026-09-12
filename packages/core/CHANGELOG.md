@@ -1,5 +1,16 @@
 # @dudousxd/nestjs-context
 
+## 1.0.4
+
+### Patch Changes
+
+- [`6544704`](https://github.com/DavideCarvalho/nestjs-context/commit/6544704f128c89de4c0e73a1b95b1e7833592163) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Say what keeps `VERSION` in sync, and that nothing checks it
+
+  Comment only. The constant is rewritten by `scripts/sync-version.mjs` during the release; a
+  release that does not run it ships a build reporting the previous version, and no test here
+  catches that. Worth stating where the constant is declared rather than only in the script
+  that moves it.
+
 ## 1.0.3
 
 ### Patch Changes
