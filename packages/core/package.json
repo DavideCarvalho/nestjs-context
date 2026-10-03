@@ -57,7 +57,7 @@
     "@nestjs/common": "12.1.1",
     "@nestjs/core": "12.1.1",
     "@nestjs/testing": "12.1.1",
-    "@tanstack/intent": "0.4.0",
+    "@tanstack/intent": "0.5.0",
     "@types/node": "20.19.43",
     "reflect-metadata": "0.2.2",
     "typescript": "5.9.3",
