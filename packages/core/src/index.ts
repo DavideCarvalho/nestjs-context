@@ -27,6 +27,14 @@ export { contextAccessor } from './accessor.js';
 export type { ContextAccessor } from './accessor.js';
 export { ContextMiddleware } from './middleware.js';
 export { ContextModule } from './module.js';
+export { ContextRunner } from './runner.js';
+export { ContextAuthenticationInterceptor } from './authentication.interceptor.js';
+export { defaultUserRefFrom } from './authentication-bridge.js';
+export type {
+  AuthenticationContextLike,
+  AuthenticationResultLike,
+  UserRefFrom,
+} from './authentication-bridge.js';
 export { CONTEXT_ACCESSOR, CONTEXT_MODULE_OPTIONS } from './tokens.js';
 export type {
   ContextModuleAsyncOptions,

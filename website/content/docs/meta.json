@@ -6,6 +6,7 @@
     "the-store",
     "customization",
     "cross-process",
+    "authentication",
     "testing"
   ]
 }

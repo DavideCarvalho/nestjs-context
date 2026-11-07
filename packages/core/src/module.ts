@@ -8,10 +8,13 @@ import {
   type Provider,
   type Type,
 } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { contextAccessor } from './accessor.js';
+import { ContextAuthenticationInterceptor } from './authentication.interceptor.js';
 import { Context } from './context.js';
 import { wireContextIntoDiagnostics } from './diagnostics-bridge.js';
 import { ContextMiddleware } from './middleware.js';
+import { ContextRunner } from './runner.js';
 import { CONTEXT_ACCESSOR, CONTEXT_MODULE_OPTIONS } from './tokens.js';
 import type {
   ContextModuleAsyncOptions,
@@ -56,14 +59,13 @@ export class ContextModule implements NestModule, OnModuleInit {
 
     const providers: Provider[] = [
       { provide: CONTEXT_MODULE_OPTIONS, useValue: options },
-      { provide: CONTEXT_ACCESSOR, useValue: contextAccessor },
-      ContextMiddleware,
+      ...ContextModule.sharedProviders(),
     ];
     return {
       module: ContextModule,
       global: true,
       providers,
-      exports: [CONTEXT_ACCESSOR, CONTEXT_MODULE_OPTIONS],
+      exports: [CONTEXT_ACCESSOR, CONTEXT_MODULE_OPTIONS, ContextRunner],
     };
   }
 
@@ -83,18 +85,30 @@ export class ContextModule implements NestModule, OnModuleInit {
   static forRootAsync(options: ContextModuleAsyncOptions): DynamicModule {
     const asyncProvider = ContextModule.buildAsyncOptionsProvider(options);
     const asyncProviders = Array.isArray(asyncProvider) ? asyncProvider : [asyncProvider];
-    const providers: Provider[] = [
-      ...asyncProviders,
-      { provide: CONTEXT_ACCESSOR, useValue: contextAccessor },
-      ContextMiddleware,
-    ];
+    const providers: Provider[] = [...asyncProviders, ...ContextModule.sharedProviders()];
     return {
       module: ContextModule,
       global: true,
       imports: (options.imports ?? []) as DynamicModule[],
       providers,
-      exports: [CONTEXT_ACCESSOR, CONTEXT_MODULE_OPTIONS],
+      exports: [CONTEXT_ACCESSOR, CONTEXT_MODULE_OPTIONS, ContextRunner],
     };
+  }
+
+  /**
+   * Providers both `forRoot` and `forRootAsync` register. The interceptor is the
+   * `@nestjs/authentication` read side (a pass-through without it); it must run
+   * inside the official interceptor, so `ContextModule` is imported after
+   * `AuthenticationModule` — see {@link ContextAuthenticationInterceptor}.
+   */
+  private static sharedProviders(): Provider[] {
+    return [
+      { provide: CONTEXT_ACCESSOR, useValue: contextAccessor },
+      ContextMiddleware,
+      ContextRunner,
+      ContextAuthenticationInterceptor,
+      { provide: APP_INTERCEPTOR, useExisting: ContextAuthenticationInterceptor },
+    ];
   }
 
   private static buildAsyncOptionsProvider(

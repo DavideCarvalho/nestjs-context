@@ -1,6 +1,7 @@
 import type { Type } from '@nestjs/common';
+import type { AuthenticationResultLike, UserRefFrom } from './authentication-bridge.js';
 import type { BaggageKeyMap } from './baggage.js';
-import type { ContextCarrier, ContextEnricher, ContextStore } from './context.js';
+import type { ContextCarrier, ContextEnricher, ContextStore, UserRef } from './context.js';
 
 // (cross-process serialize config lives on the singleton — see ContextConfig in context.ts)
 
@@ -85,6 +86,25 @@ export interface ContextModuleOptions {
    * carrier above.
    */
   baggage?: BaggageKeyMap;
+
+  // — @nestjs/authentication bridge (optional peer) —
+
+  /**
+   * Maps `AuthenticationContext.user` (from `@nestjs/authentication`) to the
+   * {@link UserRef} stored on the context by `ContextAuthenticationInterceptor`.
+   * Defaults to `{ type: 'user', id: user.id }`. Return `undefined` to set nothing.
+   */
+  userRefFrom?: UserRefFrom;
+
+  /**
+   * Rebuilds the authentication result from a carried {@link UserRef} on the
+   * other side of a process boundary, for `ContextRunner.run()`, which then runs
+   * the work under `AuthenticationContext.run(result, fn)`. Return `null` to run
+   * as anonymous (e.g. the user no longer exists).
+   */
+  rehydrateUser?: (
+    ref: UserRef,
+  ) => Promise<AuthenticationResultLike | null> | AuthenticationResultLike | null;
 }
 
 /**

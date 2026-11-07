@@ -1,0 +1,87 @@
+---
+title: With @nestjs/authentication
+description: Use the official AuthenticationContext for the user. nestjs-context only carries a reference to it across processes.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+If your app uses the official [`@nestjs/authentication`](https://docs.nestjs.com), **read the current user from its `AuthenticationContext`**. It already gives you `user`, `session`, `isAuthenticated`, `requireUser()` and `run(result, fn)`. `nestjs-context` does not duplicate any of that.
+
+`nestjs-context` adds the part the official package doesn't cover: getting **a reference** to the user (`userRef`) across a process boundary, such as a queue job, a durable step or another service, and rebuilding `AuthenticationContext` from it on the other side. The user and the session never go in the carrier. Only `{ type, id }` does.
+
+`@nestjs/authentication` is an optional peer dependency (`>=0.1.5`). Without it, everything below does nothing.
+
+---
+
+## Read side: `userRef` is set for you
+
+`ContextModule` registers `ContextAuthenticationInterceptor`. Inside a request, it reads `AuthenticationContext.user` and stores a `userRef` on the context, so `Context.serialize()` includes it.
+
+```ts
+@Module({
+  imports: [
+    AuthenticationModule.forRoot({ /* … */ }),
+    // Import AFTER AuthenticationModule — see the callout below.
+    ContextModule.forRoot({
+      // Optional. Default: (user) => ({ type: 'user', id: user.id })
+      userRefFrom: (user) => ({ type: 'member', id: `${user.orgId}:${user.id}` }),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+You don't need a guard that calls `Context.set('userRef', …)`.
+
+<Callout type="warn">
+  **Import order matters.** The official package fills `AuthenticationContext` inside its own `APP_INTERCEPTOR`, so the context is empty in middleware, in guards and in any global interceptor that runs before it. Nest runs global interceptors in the order their modules are imported. Import `ContextModule` **after** `AuthenticationModule`. If you import it first, the bridge sees no user, leaves `userRef` unset, and logs a warning once per process.
+</Callout>
+
+---
+
+## Write side: `ContextRunner` on the other side
+
+Give `ContextModule` a `rehydrateUser` function, then wrap worker code in `ContextRunner.run(carrier, fn)`:
+
+```ts
+ContextModule.forRoot({
+  // Turns a carried reference back into an AuthenticationResult (null = anonymous).
+  rehydrateUser: async (ref) => {
+    const user = await users.findById(ref.id);
+    return user ? { user } : null;
+  },
+});
+```
+
+```ts
+// producer (inside a request)
+await queue.add('send-invoice', { invoiceId, ctx: Context.serialize() });
+
+// consumer
+@Processor('billing')
+export class InvoiceWorker {
+  constructor(
+    private readonly runner: ContextRunner,
+    private readonly auth: AuthenticationContext<User>,
+  ) {}
+
+  process(job: Job) {
+    return this.runner.run(job.data.ctx, async () => {
+      this.auth.requireUser(); // the rehydrated user
+      Context.traceId();       // the producer's traceId
+    });
+  }
+}
+```
+
+`run(carrier, fn)`:
+
+1. re-enters the carrier with `Context.deserialize` (traceId, tenantId, userRef);
+2. calls `rehydrateUser(carrier.userRef)` **inside** that context, so the lookup is traced;
+3. runs `fn` under the official `AuthenticationContext.run(result, fn)`.
+
+If there is no `userRef` or no `rehydrateUser`, or `rehydrateUser` returns `null`, `fn` runs as anonymous and never inherits an outer caller's user. If the carrier is missing, `run` starts a fresh context. Errors thrown by `rehydrateUser` propagate. Without `AuthenticationModule`, `run` is just `Context.deserialize` with an async `fn`.
+
+<Callout type="info">
+  `AuthenticationContext` keeps its `AsyncLocalStorage` **per instance**, and that instance only exists in Nest's DI. `ContextRunner` gets it with `ModuleRef.get(AuthenticationContext, { strict: false })`. A `new AuthenticationContext()` you construct yourself would not be visible to your providers.
+</Callout>
