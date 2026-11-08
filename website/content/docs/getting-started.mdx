@@ -189,6 +189,10 @@ export class AuthGuard implements CanActivate {
   Why does the guard set the user instead of the middleware? Because authentication runs *after* the request context exists. The middleware enters the store at the very top of the pipeline; the guard fills in the principal once it has been verified. This split is intentional — see [The Store](/docs/context/the-store) for why the store carries a `userRef` rather than the full user object.
 </Callout>
 
+<Callout type="info">
+  Using the official `@nestjs/authentication`? Skip this guard. Read the user from its `AuthenticationContext`, and let `ContextModule` set `userRef` for you. See [With @nestjs/authentication](/docs/context/authentication).
+</Callout>
+
 From this point on, anything downstream — services, ORM subscribers, the audit and filter libraries — can read `Context.userRef()` and `Context.tenantId()` with zero wiring.
 
 ---

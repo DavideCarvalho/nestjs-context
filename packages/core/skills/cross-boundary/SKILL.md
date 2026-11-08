@@ -83,6 +83,21 @@ ContextModule.forRoot({
 Or take full control with `serialize` / `deserialize` overrides (set both
 together so a producer and consumer never mismatch).
 
+## With the official @nestjs/authentication
+
+Read the user from `AuthenticationContext`, not from nestjs-context. The
+context only carries `userRef`. `ContextModule` sets that `userRef` from
+`AuthenticationContext.user` (option `userRefFrom`), so import it AFTER
+`AuthenticationModule`. On the consuming side, inject `ContextRunner`:
+
+```ts
+ContextModule.forRoot({ rehydrateUser: async (ref) => ({ user: await users.find(ref.id) }) });
+
+await runner.run(job.data.ctx, async () => auth.requireUser()); // rehydrated user
+```
+
+Never put the user or the session in the carrier.
+
 ## W3C baggage propagation across services
 
 For a standards-compliant header any OTel-aware peer understands, use
