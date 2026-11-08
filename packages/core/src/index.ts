@@ -5,7 +5,7 @@
  * that script ships a build reporting the previous version, and nothing here
  * fails when it does.
  */
-export const VERSION = '1.0.4';
+export const VERSION = '1.1.0';
 
 export { Context } from './context.js';
 export type {

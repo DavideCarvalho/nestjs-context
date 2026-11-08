@@ -1,5 +1,14 @@
 # @dudousxd/nestjs-context
 
+## 1.1.0
+
+### Minor Changes
+
+- [#98](https://github.com/DavideCarvalho/nestjs-context/pull/98) [`30377f8`](https://github.com/DavideCarvalho/nestjs-context/commit/30377f86a7a89a0bbd37aa793adc22b12d675c18) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Bridge to the official `@nestjs/authentication` (optional peer, `>=0.1.5`). Read the user from its `AuthenticationContext`; nestjs-context only carries a reference to it across processes.
+
+  - `ContextAuthenticationInterceptor` (registered by `ContextModule`) sets `userRef` from `AuthenticationContext.user`, mapped by the new `userRefFrom` option (default `{ type: 'user', id: user.id }`). Import `ContextModule` after `AuthenticationModule` so it runs inside the official interceptor. If it's imported first, it warns once.
+  - `ContextRunner.run(carrier, fn)` (injectable) = `Context.deserialize` + `AuthenticationContext.run(await rehydrateUser(carrier.userRef), fn)`, using the new `rehydrateUser` option. The carrier never holds the user or the session.
+
 ## 1.0.4
 
 ### Patch Changes
