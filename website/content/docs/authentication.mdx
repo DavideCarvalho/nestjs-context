@@ -33,6 +33,8 @@ export class AppModule {}
 
 You don't need a guard that calls `Context.set('userRef', …)`.
 
+The default `userRefFrom` uses `user.id`, then `user.sub`. If neither is a string or number, `userRef` is left unset.
+
 <Callout type="warn">
   **Import order matters.** The official package fills `AuthenticationContext` inside its own `APP_INTERCEPTOR`, so the context is empty in middleware, in guards and in any global interceptor that runs before it. Nest runs global interceptors in the order their modules are imported. Import `ContextModule` **after** `AuthenticationModule`. If you import it first, the bridge sees no user, leaves `userRef` unset, and logs a warning once per process.
 </Callout>
@@ -80,7 +82,7 @@ export class InvoiceWorker {
 2. calls `rehydrateUser(carrier.userRef)` **inside** that context, so the lookup is traced;
 3. runs `fn` under the official `AuthenticationContext.run(result, fn)`.
 
-If there is no `userRef` or no `rehydrateUser`, or `rehydrateUser` returns `null`, `fn` runs as anonymous and never inherits an outer caller's user. If the carrier is missing, `run` starts a fresh context. Errors thrown by `rehydrateUser` propagate. Without `AuthenticationModule`, `run` is just `Context.deserialize` with an async `fn`.
+If there is no `userRef` or no `rehydrateUser`, or `rehydrateUser` returns `null`, `fn` runs as anonymous and never inherits an outer caller's user. When the carrier has a `userRef` but no `rehydrateUser` is configured, `ContextRunner` also logs a warning once per process. If the carrier is missing, `run` starts a fresh context. Errors thrown by `rehydrateUser` propagate. Without `AuthenticationModule`, `run` is just `Context.deserialize` with an async `fn`.
 
 <Callout type="info">
   `AuthenticationContext` keeps its `AsyncLocalStorage` **per instance**, and that instance only exists in Nest's DI. `ContextRunner` gets it with `ModuleRef.get(AuthenticationContext, { strict: false })`. A `new AuthenticationContext()` you construct yourself would not be visible to your providers.
