@@ -1,5 +1,11 @@
 # @dudousxd/nestjs-context
 
+## 1.1.1
+
+### Patch Changes
+
+- [#101](https://github.com/DavideCarvalho/nestjs-context/pull/101) [`763475c`](https://github.com/DavideCarvalho/nestjs-context/commit/763475c0e7b16d65aae46751cf2a4992375e79cc) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - Fix the `userRefFrom` TSDoc: the default uses `user.id ?? user.sub`.
+
 ## 1.1.0
 
 ### Minor Changes
