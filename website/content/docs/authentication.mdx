@@ -23,7 +23,7 @@ If your app uses the official [`@nestjs/authentication`](https://docs.nestjs.com
     AuthenticationModule.forRoot({ /* … */ }),
     // Import AFTER AuthenticationModule — see the callout below.
     ContextModule.forRoot({
-      // Optional. Default: (user) => ({ type: 'user', id: user.id })
+      // Optional. Default: (user) => ({ type: 'user', id: user.id ?? user.sub })
       userRefFrom: (user) => ({ type: 'member', id: `${user.orgId}:${user.id}` }),
     }),
   ],
