@@ -24,6 +24,7 @@ import {
   type ContextModuleOptions,
   ContextRunner,
   type UserRef,
+  defaultUserRefFrom,
 } from '../src/index.js';
 
 interface User {
@@ -134,6 +135,16 @@ describe('read side: AuthenticationContext.user → Context userRef', () => {
   });
 });
 
+describe('defaultUserRefFrom', () => {
+  it('reads id, else the JWT/OIDC sub claim, else nothing', () => {
+    expect(defaultUserRefFrom({ id: 'u1', sub: 'x' })).toEqual({ type: 'user', id: 'u1' });
+    expect(defaultUserRefFrom({ sub: 'auth0|42' })).toEqual({ type: 'user', id: 'auth0|42' });
+    expect(defaultUserRefFrom({ id: 7 })).toEqual({ type: 'user', id: 7 });
+    expect(defaultUserRefFrom({ email: 'a@b.c' })).toBeUndefined();
+    expect(defaultUserRefFrom(null)).toBeUndefined();
+  });
+});
+
 describe('interceptor order', () => {
   it('runs inside the official interceptor when ContextModule is imported after AuthenticationModule', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -221,6 +232,20 @@ describe('write side: ContextRunner rehydrates on the other side', () => {
       await runner.run({ traceId: 't2', userRef: { type: 'user', id: 'gone' } }, () => auth.user),
     ).toBeNull();
     expect(rehydrateUser).toHaveBeenCalledOnce();
+  });
+
+  it('warns once when a carrier has a userRef but no rehydrateUser is configured', async () => {
+    ContextRunner.resetWarning();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    app = await bootWorker({});
+    const runner = app.get(ContextRunner);
+    const auth = app.get<AuthenticationContext<User>>(AuthenticationContext);
+    const carrier = { traceId: 't', userRef: { type: 'user', id: 'u1' } };
+    expect(await runner.run(carrier, () => auth.user)).toBeNull();
+    expect(await runner.run(carrier, () => auth.user)).toBeNull();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(String(warn.mock.calls[0]?.[0])).toContain('no rehydrateUser');
+    warn.mockRestore();
   });
 
   it('starts a fresh context for a missing carrier, and propagates rehydrate errors', async () => {

@@ -9,7 +9,7 @@ If your app uses the official [`@nestjs/authentication`](https://docs.nestjs.com
 
 `nestjs-context` adds the part the official package doesn't cover: getting **a reference** to the user (`userRef`) across a process boundary, such as a queue job, a durable step or another service, and rebuilding `AuthenticationContext` from it on the other side. The user and the session never go in the carrier. Only `{ type, id }` does.
 
-`@nestjs/authentication` is an optional peer dependency (`>=0.1.5`). Without it, everything below does nothing.
+`@nestjs/authentication` is an optional peer dependency (`>=0.1.5`). Without it, the bridge is a pass-through: `ContextRunner` still re-enters the carrier (traceId, tenantId) with `Context.deserialize`, but no user is rebuilt.
 
 ---
 

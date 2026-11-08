@@ -9,6 +9,8 @@ import { CONTEXT_MODULE_OPTIONS } from './tokens.js';
 import { randomTraceId } from './traceparent.js';
 import type { ContextModuleOptions } from './types.js';
 
+let warnedNoRehydrate = false;
+
 /**
  * Runs a unit of work on "the other side" of a process boundary (queue worker,
  * durable step, scheduled job) with the context the producer serialized.
@@ -54,11 +56,22 @@ export class ContextRunner implements OnModuleInit {
       }
       const ref = carrier?.userRef;
       const rehydrate = this.options.rehydrateUser;
+      if (ref && !rehydrate && !warnedNoRehydrate) {
+        warnedNoRehydrate = true;
+        console.warn(
+          '[nestjs-context] ContextRunner received a carrier with a userRef but ContextModule has no rehydrateUser, so the work runs anonymous. Pass ContextModule.forRoot({ rehydrateUser }) to run it as the user. This warning fires once per process.',
+        );
+      }
       const result = ref && rehydrate ? await rehydrate(ref) : null;
       return auth.run(result ?? null, fn);
     };
     return carrier
       ? Context.deserialize(carrier, body)
       : Context.run({ traceId: randomTraceId() }, body);
+  }
+
+  /** Re-arm the one-shot missing-`rehydrateUser` warning. For tests. */
+  static resetWarning(): void {
+    warnedNoRehydrate = false;
   }
 }

@@ -28,14 +28,15 @@ export interface AuthenticationContextLike {
 export type UserRefFrom = (user: unknown) => UserRef | undefined;
 
 /**
- * Default {@link UserRefFrom}: `{ type: 'user', id: user.id }` when the user has a
- * string/number `id`, else `undefined` (nothing is put on the context).
+ * Default {@link UserRefFrom}: `{ type: 'user', id }` from the user's string/number `id`, else
+ * its `sub` (the JWT/OIDC subject claim), else `undefined` (nothing is put on the context).
  */
 export const defaultUserRefFrom: UserRefFrom = (user) => {
   if (typeof user !== 'object' || user === null) {
     return undefined;
   }
-  const id = (user as { id?: unknown }).id;
+  const record = user as { id?: unknown; sub?: unknown };
+  const id = record.id ?? record.sub;
   return typeof id === 'string' || typeof id === 'number' ? { type: 'user', id } : undefined;
 };
 
