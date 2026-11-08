@@ -67,7 +67,7 @@ The available population options on `ContextModuleOptions`:
 
 The `req` passed to these hooks is structural (`{ headers?, [key]: unknown }`), so the same hooks work on Express, Fastify, or any other adapter — the library never depends on a concrete request type.
 
-`userRef` still typically enters **later**, via `Context.set()` in your auth guard, because authentication runs after the context is established (see [Getting Started](/docs/context/getting-started#step-4--populate-the-user-and-tenant)).
+`userRef` still typically enters **later**, via `Context.set()` in your auth guard, because authentication runs after the context is established (see [Getting Started](/docs/context/getting-started#step-4--populate-the-user-and-tenant)). With `@nestjs/authentication`, `ContextModule` sets it for you instead (see [With @nestjs/authentication](/docs/context/authentication)).
 
 ### Precedence — the resolved `traceId` and `requestId` always win
 

@@ -51,6 +51,8 @@ Context.deserialize(carrier, () => {
 
 Everything `fn` calls — synchronously or across `await`s — sees the re-hydrated context, just as if it were running inside the original request.
 
+`Context.deserialize` restores the refs only. If you use `@nestjs/authentication` and want the worker to run as the user, use `ContextRunner.run(carrier, fn)` instead: it also rehydrates the user. See [With @nestjs/authentication](/docs/context/authentication#write-side-contextrunner-on-the-other-side).
+
 ---
 
 ## The BullMQ pattern

@@ -92,7 +92,8 @@ export interface ContextModuleOptions {
   /**
    * Maps `AuthenticationContext.user` (from `@nestjs/authentication`) to the
    * {@link UserRef} stored on the context by `ContextAuthenticationInterceptor`.
-   * Defaults to `{ type: 'user', id: user.id }`. Return `undefined` to set nothing.
+   * Defaults to `{ type: 'user', id: user.id ?? user.sub }`, and sets nothing when
+   * neither is a string or number. Return `undefined` to set nothing.
    */
   userRefFrom?: UserRefFrom;
 
