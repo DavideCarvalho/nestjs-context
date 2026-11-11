@@ -36,8 +36,8 @@ importers:
   packages/core:
     devDependencies:
       '@dudousxd/nestjs-diagnostics':
-        specifier: 0.8.0
-        version: 0.8.0(@nestjs/common@12.4.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.4.0)(reflect-metadata@0.2.2)
+        specifier: 0.8.1
+        version: 0.8.1(@nestjs/common@12.4.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.4.0)(reflect-metadata@0.2.2)
       '@nestjs/authentication':
         specifier: 0.1.5
         version: 0.1.5(@nestjs/common@12.4.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.4.0)(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -213,8 +213,8 @@ packages:
   '@changesets/write@0.4.0':
     resolution: {integrity: sha512-CdTLvIOPiCNuH71pyDu3rA+Q0n65cmAbXnwWH84rKGiFumFzkmHNT8KHTMEchcxN+Kl8I54xGUhJ7l3E7X396Q==}
 
-  '@dudousxd/nestjs-diagnostics@0.8.0':
-    resolution: {integrity: sha512-3frnGK2zyLHGc32OSu2iJu36a3L8ZMBFSwMKJyMz7AToUTfeBmU/NF135GzHdu1bMCzL5f4b7rmzvj7FmNfIZg==}
+  '@dudousxd/nestjs-diagnostics@0.8.1':
+    resolution: {integrity: sha512-lH9g5H/RoFqxbcWhOlsEOURazqfjz2b9uF3mjsDjaryxqWt8LvFPB41YwF4Uv+JJEl79dPKHuZH/V1LG4YmuZA==}
     engines: {node: '>=20'}
     peerDependencies:
       '@nestjs/common': ^10 || ^11 || ^12
@@ -1911,7 +1911,7 @@ snapshots:
       human-id: 4.2.0
       prettier: 2.8.8
 
-  '@dudousxd/nestjs-diagnostics@0.8.0(@nestjs/common@12.4.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.4.0)(reflect-metadata@0.2.2)':
+  '@dudousxd/nestjs-diagnostics@0.8.1(@nestjs/common@12.4.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.4.0)(reflect-metadata@0.2.2)':
     optionalDependencies:
       '@nestjs/common': 12.4.0(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/core': 12.4.0(@nestjs/common@12.4.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@12.4.0)(reflect-metadata@0.2.2)(rxjs@7.8.2)
