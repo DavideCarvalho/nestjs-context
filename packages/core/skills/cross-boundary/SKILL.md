@@ -82,9 +82,12 @@ ContextModule.forRoot({
 ```
 
 Or take full control with `serialize` / `deserialize` overrides (set both
-together so a producer and consumer never mismatch). When `tenancy.enabled` is
-true, `tenant` and `tenantId` are added to the carrier even if a custom
-`serialize` leaves them out.
+together so a producer and consumer never mismatch). A custom `serialize` /
+`deserialize` decides for itself: the tenant crosses only if your `serialize`
+writes it, and is restored only if your `deserialize` returns it — it is never
+added behind either one, even when `tenancy.enabled` is true. (The `carrier`
+list is different: with tenancy on, `tenant`/`tenantId` ride even when the
+list leaves them out.)
 
 ## With the official @nestjs/authentication
 
@@ -182,8 +185,8 @@ Correct:
 ContextModule.forRoot({ carrier: ['traceId', 'tenantId', 'userRef', 'locale'] });
 ```
 
-`serialize()` only copies the carrier fields (plus `tenant`/`tenantId` always when
-`tenancy.enabled` is true); an augmented field defaults out and
+The default `serialize()` only copies the carrier fields (plus `tenant`/`tenantId`
+always when `tenancy.enabled` is true); an augmented field defaults out and
 silently arrives `undefined` on the worker side.
 
 Source: packages/core/src/context.ts:182; packages/core/src/types.ts:65
