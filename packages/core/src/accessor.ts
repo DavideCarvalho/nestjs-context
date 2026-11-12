@@ -12,16 +12,19 @@ export interface ContextAccessor {
   tenantId(): string | undefined;
   userRef(): UserRef | undefined;
   get(): ContextStore | undefined;
-  /** The active tenant (see `Context.tenant`). */
-  tenant(): TenantRef | undefined;
-  /** The resolved `tenancy` option: `{ enabled, kinds? }`. */
-  tenancy(): ResolvedTenancy;
-  /** How a lib must scope data right now (see `Context.tenantFilter`). */
-  tenantFilter(options?: TenantFilterOptions): TenantFilter;
+  /**
+   * The active tenant (see `Context.tenant`). Optional so an app that binds its own accessor
+   * keeps compiling; readers treat a missing method as "tenancy off".
+   */
+  tenant?(): TenantRef | undefined;
+  /** The resolved `tenancy` option: `{ enabled, kinds? }`. Optional, as above. */
+  tenancy?(): ResolvedTenancy;
+  /** How a lib must scope data right now (see `Context.tenantFilter`). Optional, as above. */
+  tenantFilter?(options?: TenantFilterOptions): TenantFilter;
 }
 
 /** Default accessor: a thin facade over the singleton {@link Context}. */
-export const contextAccessor: ContextAccessor = {
+export const contextAccessor: Required<ContextAccessor> = {
   traceId: () => Context.traceId(),
   tenantId: () => Context.tenantId(),
   userRef: () => Context.userRef(),
