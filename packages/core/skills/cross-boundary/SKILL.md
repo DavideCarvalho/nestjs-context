@@ -185,8 +185,10 @@ Correct:
 ContextModule.forRoot({ carrier: ['traceId', 'tenantId', 'userRef', 'locale'] });
 ```
 
-The default `serialize()` only copies the carrier fields (plus `tenant`/`tenantId`
-always when `tenancy.enabled` is true); an augmented field defaults out and
+The default `serialize()` only copies the carrier fields — plus `tenant`
+whenever one is set, even with tenancy off. A custom `carrier` list is
+different: with `tenancy.enabled` it always adds `tenant`/`tenantId` even when
+the list leaves them out. An augmented field defaults out and
 silently arrives `undefined` on the worker side.
 
 Source: packages/core/src/context.ts:182; packages/core/src/types.ts:65
