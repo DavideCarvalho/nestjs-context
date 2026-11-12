@@ -1,5 +1,16 @@
 # @dudousxd/nestjs-context-testing
 
+## 2.0.0
+
+### Major Changes
+
+- [#109](https://github.com/DavideCarvalho/nestjs-context/pull/109) [`f2fa595`](https://github.com/DavideCarvalho/nestjs-context/commit/f2fa595b7da748354e8675f30f56a9cc92f4120d) Thanks [@DavideCarvalho](https://github.com/DavideCarvalho)! - **Breaking:** require Node.js 24 or newer (`engines.node` is now `>=24`, was `>=20`). CI tests on Node 24 and 26. No API changes: see the Upgrading page in the docs.
+
+### Patch Changes
+
+- Updated dependencies [[`f2fa595`](https://github.com/DavideCarvalho/nestjs-context/commit/f2fa595b7da748354e8675f30f56a9cc92f4120d)]:
+  - @dudousxd/nestjs-context@2.0.0
+
 ## 1.0.2
 
 ### Patch Changes
