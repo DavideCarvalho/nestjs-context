@@ -72,7 +72,7 @@ active at bind time it returns the function unchanged (runs with no context).
 
 ## Include a custom field in the carrier
 
-The default carrier is only `traceId`/`tenantId`/`tenant`/`userRef`. To make a
+The default carrier is only `traceId`/`tenantId`/`tenant`/`tenantFamilies`/`userRef`. To make a
 module-augmented field survive the boundary, list it in `carrier`.
 
 ```ts
@@ -86,8 +86,8 @@ together so a producer and consumer never mismatch). A custom `serialize` /
 `deserialize` decides for itself: the tenant crosses only if your `serialize`
 writes it, and is restored only if your `deserialize` returns it — it is never
 added behind either one, even when `tenancy.enabled` is true. (The `carrier`
-list is different: with tenancy on, `tenant`/`tenantId` ride even when the
-list leaves them out.)
+list is different: with tenancy on, `tenant`/`tenantId` (and `tenantFamilies`,
+when set) ride even when the list leaves them out.)
 
 ## With the official @nestjs/authentication
 
@@ -185,7 +185,7 @@ Correct:
 ContextModule.forRoot({ carrier: ['traceId', 'tenantId', 'userRef', 'locale'] });
 ```
 
-The default `serialize()` only copies the carrier fields — plus `tenant`
+The default `serialize()` only copies the carrier fields — plus `tenant`/`tenantFamilies`
 whenever one is set, even with tenancy off. A custom `carrier` list is
 different: with `tenancy.enabled` it always adds `tenant`/`tenantId` (and
 `tenantFamilies`, when set) even when the list leaves them out. A personal tenant
