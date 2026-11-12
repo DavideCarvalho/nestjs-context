@@ -95,8 +95,10 @@ export class AuditService {
 ```
 
 `ContextAccessor` is a narrow read-only surface — `traceId()`, `tenantId()`,
-`userRef()`, `get()` — with no `set`/`run`: consumers read, they do not drive the
-lifecycle.
+`userRef()`, `get()`, `tenant()`, `tenancy()`, `tenantFilter()` — with no
+`set`/`run`: consumers read, they do not drive the lifecycle. A custom object
+bound to `CONTEXT_ACCESSOR` must implement all seven (delegate the last three
+to `Context`).
 
 ## Read the whole store
 
