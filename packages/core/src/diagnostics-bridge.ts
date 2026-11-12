@@ -2,28 +2,45 @@ import type { ContextAccessor as DiagnosticsContextAccessor } from '@dudousxd/ne
 import { contextAccessor } from './accessor.js';
 
 /**
- * Soft, one-way bridge into `@dudousxd/nestjs-diagnostics` (an OPTIONAL peer).
+ * The global slot `@dudousxd/nestjs-diagnostics` keeps its context accessor in:
+ * `globalThis[Symbol.for('@dudousxd/nestjs-diagnostics:accessor')]` holds
+ * `{ current: accessor | null }`. Other libs read the context from it outside DI.
+ */
+export const DIAGNOSTICS_ACCESSOR_SLOT = Symbol.for('@dudousxd/nestjs-diagnostics:accessor');
+
+interface AccessorHolder {
+  current: unknown;
+}
+
+/**
+ * Publish {@link contextAccessor} on the diagnostics global slot, and register it
+ * with `@dudousxd/nestjs-diagnostics` (an OPTIONAL peer) when installed.
  *
- * When that package is installed, we register this module's {@link contextAccessor}
- * as its trace source, so `emit()` auto-fills the `traceId` on every `aviary:*`
- * diagnostic event — for authz, inertia, durable, notifications, and any future
- * emitter — with zero action from the app.
+ * The slot is written structurally first, so libs that read the context outside
+ * DI (ORM hooks, workers) find it even without diagnostics installed. Diagnostics
+ * adopts an existing holder when it loads, so both sides share one cell.
  *
- * The import is dynamic on purpose: diagnostics stays fully optional. If it is not
- * installed the import rejects and we no-op (events simply carry no `traceId`).
- * There is no static import in either direction — diagnostics mirrors our accessor
- * shape structurally rather than importing us — so the two packages stay decoupled.
+ * With diagnostics installed, `emit()` then auto-fills the `traceId` on every
+ * `aviary:*` diagnostic event. The import is dynamic on purpose: if diagnostics is
+ * not installed the import rejects and we stop there.
  */
 export async function wireContextIntoDiagnostics(): Promise<void> {
+  const slots = globalThis as typeof globalThis & {
+    [DIAGNOSTICS_ACCESSOR_SLOT]?: AccessorHolder;
+  };
+  const holder = slots[DIAGNOSTICS_ACCESSOR_SLOT];
+  if (holder !== undefined && holder !== null && typeof holder === 'object') {
+    holder.current = contextAccessor;
+  } else {
+    slots[DIAGNOSTICS_ACCESSOR_SLOT] = { current: contextAccessor };
+  }
   try {
     const diagnostics = await import('@dudousxd/nestjs-diagnostics');
     // The two `ContextAccessor` shapes are identical for diagnostics' purposes (it
     // only ever calls `traceId()`); they differ solely in `get()`'s declared store
-    // type — our `ContextStore` is a concrete interface, diagnostics' is the looser
-    // `Record<string, unknown>`. Cast across the package boundary; diagnostics never
-    // reads the store.
+    // type. Cast across the package boundary; diagnostics never reads the store.
     diagnostics.setContextAccessor(contextAccessor as unknown as DiagnosticsContextAccessor);
   } catch {
-    // @dudousxd/nestjs-diagnostics is not installed — nothing to wire.
+    // @dudousxd/nestjs-diagnostics is not installed: the structural slot is enough.
   }
 }

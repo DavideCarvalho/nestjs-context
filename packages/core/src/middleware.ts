@@ -1,5 +1,5 @@
 import { Inject, Injectable, type NestMiddleware } from '@nestjs/common';
-import { Context, type ContextStore } from './context.js';
+import { Context, type ContextStore, syncTenantFields } from './context.js';
 import { CONTEXT_MODULE_OPTIONS } from './tokens.js';
 import { parseTraceparent, randomTraceId } from './traceparent.js';
 import type { ContextModuleOptions, ContextRequest } from './types.js';
@@ -78,6 +78,9 @@ export class ContextMiddleware implements NestMiddleware {
         }
       }
     }
+
+    // A `tenant` returned by `initialize`/an enricher also sets `tenantId`.
+    syncTenantFields(store);
 
     next();
   }

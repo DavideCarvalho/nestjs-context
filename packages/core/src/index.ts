@@ -15,6 +15,15 @@ export type {
   ContextEnricher,
   UserRef,
 } from './context.js';
+export type {
+  ResolvedTenancy,
+  TenancyConfig,
+  TenantFilter,
+  TenantFilterOptions,
+  TenantInput,
+  TenantRef,
+  TenantSource,
+} from './tenancy.js';
 export {
   type Baggage,
   type BaggageKeyMap,

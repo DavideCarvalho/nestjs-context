@@ -1,0 +1,277 @@
+---
+title: Tenancy
+description: Make the request's organization the tenant that every Aviary lib scopes its data by. Off until you turn it on.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The **tenant** is the customer the data belongs to: an organization, a user's personal workspace, a clinic. Once tenancy is on and your app sets the tenant of each request, tenant-aware Aviary libs show a request only its own tenant's data, with no tenancy code in your services.
+
+Tenancy is **off by default**. Nothing changes for an app that does not turn it on.
+
+---
+
+## Turn it on
+
+```ts
+ContextModule.forRoot({
+  tenancy: {
+    enabled: true,
+    kinds: ['organization'], // optional: the tenant kinds libs honour
+  },
+});
+```
+
+| Option | Default | What it does |
+|--------|---------|--------------|
+| `enabled` | `false` | The single switch. Every lib whose own `tenancy` option is `'inherit'` (their default) starts scoping data by the tenant. |
+| `kinds` | all kinds | Allow-list of tenant kinds. A tenant of another kind counts as no tenant. |
+
+When `enabled` is true:
+
+- `tenant` and `tenantId` always ride the cross-process carrier, even if your `carrier` list leaves them out, and even with a custom `serialize`.
+- `Context.toBaggage()` also sends the tenant's kind as `tenantKind`.
+- One `info` line at boot says tenancy is on.
+
+`forRootAsync` accepts the same `tenancy` option.
+
+---
+
+## Set the tenant
+
+The app decides who the tenant is. Resolve it on the server, then make one call, typically from your auth guard or an interceptor:
+
+```ts
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { Context } from '@dudousxd/nestjs-context';
+
+@Injectable()
+export class OrgGuard implements CanActivate {
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
+    const req = ctx.switchToHttp().getRequest();
+    const claims = req.user; // already verified by your auth layer
+
+    if (claims.org_id) {
+      Context.setTenant({
+        id: claims.org_id,
+        kind: 'organization',
+        slug: claims.org_slug, // optional, display only
+        role: claims.org_role, // optional, the caller's role in this org
+      });
+    }
+    return true;
+  }
+}
+```
+
+`Context.setTenant` writes both `tenant` and `tenantId`. `Context.setTenant(null)` clears both. A request with no tenant (a user with no organization) is a normal state, not an error.
+
+<Callout type="warn">
+  Take the tenant from something the server verified: a signed token claim, a session, a membership lookup. Never take it straight from a client header or query parameter.
+</Callout>
+
+Apps that already put a `tenantId` in the store through `initialize`, an enricher or `Context.set('tenantId', …)` keep working. A plain `tenantId` reads as `{ id, kind: 'unknown', source: 'legacy' }`. Set a `kind` with `setTenant` (or return a `tenant` from `initialize`) when you use `kinds`, because a tenant of kind `'unknown'` never matches a `kinds` list.
+
+---
+
+## Read the tenant
+
+```ts
+Context.tenant();   // { id: 'org_1', kind: 'organization', source: 'app', slug: 'acme' } | undefined
+Context.tenantId(); // 'org_1' | undefined, always equal to tenant()?.id
+Context.tenancy();  // { enabled: true, kinds: ['organization'] }
+```
+
+A `TenantRef` has these fields:
+
+| Field | Meaning |
+|-------|---------|
+| `id` | Stable key. Libs stamp and compare rows by it. |
+| `kind` | `'organization'`, `'user'`, or any string of your own (`'clinic'`). `'unknown'` for a plain `tenantId`. |
+| `source` | `'app'` (set in this process), `'carrier'` (restored from a carrier or baggage), `'legacy'` (only a plain `tenantId`). |
+| `slug` | Display only, never a key. |
+| `role` | The caller's role inside this tenant. Display and authorization input only. |
+
+---
+
+## Run code as a tenant, or as all tenants
+
+Code outside a request (scripts, seeders, webhook handlers, tests) has no tenant. Give it one:
+
+```ts
+await Context.withTenant({ id: 'org_1', kind: 'organization' }, () => importInvoices());
+```
+
+`withTenant` runs the function in a copy of the current store with that tenant, or in a new store when there is none. `withTenant(null, fn)` runs with no tenant.
+
+Admin and maintenance code that must see every tenant says so explicitly:
+
+```ts
+const all = await Context.allTenants(() => invoices.findAll());
+```
+
+`allTenants` is the only way to see other tenants' data. It is never carried across a boundary: a job enqueued inside it runs with the tenant it was enqueued with.
+
+---
+
+## How libs scope data
+
+Every tenant-aware lib asks the context for a **filter**, and applies the same rule to rows that carry a nullable tenant id:
+
+| Filter mode | When | Row of this tenant | Row of another tenant | Row with no tenant |
+|-------------|------|--------------------|-----------------------|--------------------|
+| `tenant` | a request with a tenant | visible | invisible | invisible (visible with `nullRows: 'shared'`) |
+| `tenantless` | a request with no tenant, or one of a kind outside `kinds` | — | invisible | visible |
+| `all` | inside `Context.allTenants()` | visible | visible | visible |
+| `system` | no context at all (boot, internal workers) | visible | visible | visible |
+
+New rows are stamped with the tenant's id in `tenant` mode and with no tenant otherwise. A row the request cannot see is reported as **not found** (404), never as forbidden (403), so ids of other tenants do not leak.
+
+Tenancy only narrows what a request sees. Each lib's own access rules still run.
+
+### Per-lib option
+
+Each tenant-aware lib takes the same option:
+
+```ts
+tenancy?: 'inherit' | false | {
+  enabled?: 'inherit' | boolean; // 'inherit' follows ContextModule's tenancy.enabled
+  kinds?: string[];              // the lib's own allow-list, instead of the context's
+  nullRows?: 'tenantless' | 'shared'; // default 'tenantless'
+};
+```
+
+The default `'inherit'` follows the context switch. `false` keeps one lib out of tenancy. An explicit argument you pass to a lib call, or an explicit tenant hook in the lib's config, always wins over the context tenant.
+
+---
+
+## Across process boundaries
+
+The tenant travels with the rest of the context, so a queued job or a durable step runs in the tenant that dispatched it:
+
+```ts
+await queue.add('send-invoice', { ...payload, __ctx: Context.serialize() });
+
+// worker
+Context.deserialize(job.data.__ctx, () => handler(job)); // Context.tenant() is restored, source 'carrier'
+```
+
+The default carrier includes `tenant` when one is set. With tenancy on, it is added even when your `carrier` list or custom `serialize` leaves it out. See [Cross-Process](/docs/context/cross-process).
+
+Over W3C baggage, `toBaggage()` sends `tenantId` and, with tenancy on, `tenantKind`. `fromBaggage()` restores the tenant only from a header that carries both. Only call `fromBaggage` on traffic from services you trust.
+
+---
+
+## Testing
+
+```ts
+import { Context } from '@dudousxd/nestjs-context';
+
+it('shows only the tenant rows', async () => {
+  Context.configure({ tenancy: { enabled: true } });
+  const rows = await Context.withTenant({ id: 'org_1', kind: 'organization' }, () => service.list());
+  expect(rows.every((r) => r.tenantId === 'org_1')).toBe(true);
+  Context.resetConfig();
+});
+```
+
+---
+
+## For lib authors: the local reader
+
+Libs never import `@dudousxd/nestjs-context`. They read the accessor structurally, either the `CONTEXT_ACCESSOR` they injected with `@Optional()`, or the global slot `globalThis[Symbol.for('@dudousxd/nestjs-diagnostics:accessor')].current`, which `ContextModule` publishes at init even when `@dudousxd/nestjs-diagnostics` is not installed.
+
+Copy this file into your lib (for example `src/tenancy.ts`) as is. With the context missing, or an older context without tenancy, `readTenancy` answers `{ enabled: false }`, so your lib behaves exactly as it does today. Call it per operation, not once at boot.
+
+```ts
+// Local reader for the @dudousxd/nestjs-context tenancy contract. Copied into each lib;
+// it imports nothing, so the lib works with any context version or none at all.
+export interface TenantRef {
+  id: string;
+  kind: string;
+  source: string;
+  slug?: string;
+  role?: string;
+}
+export type TenantFilter =
+  | { mode: 'system' }
+  | { mode: 'all' }
+  | { mode: 'tenantless' }
+  | { mode: 'tenant'; tenant: TenantRef };
+export type TenancyOption =
+  | 'inherit'
+  | false
+  | { enabled?: 'inherit' | boolean; kinds?: string[]; nullRows?: 'tenantless' | 'shared' };
+export type Tenancy =
+  | { enabled: false }
+  | { enabled: true; nullRows: 'tenantless' | 'shared'; filter(): TenantFilter };
+
+interface Accessor {
+  tenancy?(): { enabled: boolean; kinds?: string[] };
+  tenantFilter?(options?: { kinds?: string[] }): TenantFilter;
+}
+const SLOT = Symbol.for('@dudousxd/nestjs-diagnostics:accessor');
+
+/** `accessor`: the `CONTEXT_ACCESSOR` injected with `@Optional()`, if any. Call per operation. */
+export function readTenancy(option: TenancyOption = 'inherit', accessor?: unknown): Tenancy {
+  const slot = (globalThis as unknown as Record<symbol, { current?: unknown } | undefined>)[SLOT];
+  const a = (accessor ?? slot?.current) as Accessor | null | undefined;
+  if (option === false || typeof a?.tenancy !== 'function' || !a.tenantFilter) {
+    return { enabled: false };
+  }
+  const own = typeof option === 'object' ? option : {};
+  const inherit = own.enabled === undefined || own.enabled === 'inherit';
+  if (!(inherit ? a.tenancy().enabled : own.enabled)) return { enabled: false };
+  const kinds = own.kinds;
+  return {
+    enabled: true,
+    nullRows: own.nullRows ?? 'tenantless',
+    filter: () => a.tenantFilter!(kinds ? { kinds } : undefined),
+  };
+}
+
+/** The matching rule: may this request see a row whose tenant column holds `rowTenantId`? */
+export function canSeeRow(t: Tenancy, rowTenantId: string | null | undefined): boolean {
+  if (!t.enabled) return true;
+  const f = t.filter();
+  if (f.mode === 'system' || f.mode === 'all') return true;
+  if (rowTenantId === null || rowTenantId === undefined) {
+    return f.mode === 'tenantless' || t.nullRows === 'shared';
+  }
+  return f.mode === 'tenant' && f.tenant.id === rowTenantId;
+}
+
+/** The tenant id to stamp on a new row: the active tenant's id, else `null`. */
+export function rowTenantId(t: Tenancy): string | null {
+  if (!t.enabled) return null;
+  const f = t.filter();
+  return f.mode === 'tenant' ? f.tenant.id : null;
+}
+```
+
+Use it like this:
+
+```ts
+@Injectable()
+export class InvoiceStore {
+  constructor(
+    @Optional() @Inject(Symbol.for('@dudousxd/nestjs-context:accessor')) private readonly ctx?: unknown,
+    @Inject(INVOICE_OPTIONS) private readonly options: { tenancy?: TenancyOption } = {},
+  ) {}
+
+  async find(id: string) {
+    const row = await this.repo.findOne(id);
+    if (!row || !canSeeRow(readTenancy(this.options.tenancy, this.ctx), row.tenantId)) {
+      throw new NotFoundException(); // 404, never 403
+    }
+    return row;
+  }
+
+  async create(input: NewInvoice) {
+    const tenantId = rowTenantId(readTenancy(this.options.tenancy, this.ctx));
+    return this.repo.insert({ ...input, tenantId });
+  }
+}
+```
+
+For queries, turn the filter into a `WHERE` clause instead of filtering in memory: `tenant` → `tenant_id = :id` (or `tenant_id = :id OR tenant_id IS NULL` with `nullRows: 'shared'`), `tenantless` → `tenant_id IS NULL`, `all` and `system` → no condition.

@@ -2,6 +2,7 @@ import type { Type } from '@nestjs/common';
 import type { AuthenticationResultLike, UserRefFrom } from './authentication-bridge.js';
 import type { BaggageKeyMap } from './baggage.js';
 import type { ContextCarrier, ContextEnricher, ContextStore, UserRef } from './context.js';
+import type { TenancyConfig } from './tenancy.js';
 
 // (cross-process serialize config lives on the singleton — see ContextConfig in context.ts)
 
@@ -86,6 +87,16 @@ export interface ContextModuleOptions {
    * carrier above.
    */
   baggage?: BaggageKeyMap;
+
+  // — tenancy —
+
+  /**
+   * Scope data by the active tenant (the customer the data belongs to) in every
+   * lib whose own `tenancy` option is `'inherit'` (their default). Off by default:
+   * nothing changes until `enabled: true`. When on, `tenant` and `tenantId` always
+   * ride the cross-process carrier, even if `carrier` does not list them.
+   */
+  tenancy?: TenancyConfig;
 
   // — @nestjs/authentication bridge (optional peer) —
 

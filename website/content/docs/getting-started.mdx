@@ -183,6 +183,8 @@ export class AuthGuard implements CanActivate {
 }
 ```
 
+To give the tenant a kind (an organization, a user workspace, …) so tenant-aware libs can scope data by it, call `Context.setTenant({ id, kind })` instead of setting `tenantId`. See [Tenancy](/docs/context/tenancy).
+
 `Context.set(key, value)` mutates the store that the middleware already entered. It is fully typed against `ContextStore`, so `Context.set('userRef', ...)` only accepts a `UserRef`. Called with **no active context** it is a no-op (it never throws), but it emits a one-shot `console.warn` — a silently dropped `set` is a common footgun (e.g. an auth guard running on a route the middleware was excluded from), so the library makes the gap visible. The warning fires once per process; `Context.resetSetWarning()` re-arms it (primarily for tests).
 
 <Callout type="info">

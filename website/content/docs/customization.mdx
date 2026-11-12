@@ -248,8 +248,13 @@ interface ContextAccessor {
   tenantId(): string | undefined;
   userRef(): UserRef | undefined;
   get(): ContextStore | undefined;
+  tenant(): TenantRef | undefined;
+  tenancy(): { enabled: boolean; kinds?: string[] };
+  tenantFilter(options?: { kinds?: string[] }): TenantFilter;
 }
 ```
+
+The three tenant methods are described on [Tenancy](/docs/context/tenancy).
 
 The default implementation, `contextAccessor`, is a thin facade over the singleton `Context`. To change what every consumer sees — for instance, to make an accessor that resolves the *full* user from the `userRef`, or that derives the tenant differently — provide your own implementation against the token:
 
@@ -269,6 +274,9 @@ class HydratingAccessor implements ContextAccessor {
   tenantId() { return Context.tenantId(); }
   userRef() { return Context.userRef(); }
   get() { return Context.get(); }
+  tenant() { return Context.tenant(); }
+  tenancy() { return Context.tenancy(); }
+  tenantFilter(options?: { kinds?: string[] }) { return Context.tenantFilter(options); }
   // ...plus whatever extra resolution your consumers expect
 }
 

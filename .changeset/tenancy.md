@@ -1,0 +1,11 @@
+---
+'@dudousxd/nestjs-context': minor
+---
+
+Tenancy: the request's tenant (the customer the data belongs to) as part of the context. Off by default; nothing changes until you turn it on.
+
+- `TenantRef { id, kind, source, slug?, role? }`. The store gains `tenant` and `tenantScope`; `tenantId` stays in sync with `tenant.id`. A plain `tenantId` reads as `{ id, kind: 'unknown', source: 'legacy' }`.
+- `Context.tenant()`, `Context.setTenant(ref | null)`, `Context.withTenant(ref, fn)` (creates a store when there is none), `Context.allTenants(fn)`, `Context.tenancy()` and `Context.tenantFilter()` (modes `system`, `all`, `tenantless`, `tenant`).
+- `ContextModule.forRoot({ tenancy: { enabled, kinds } })`. When enabled, `tenant` and `tenantId` always ride the carrier (also through a custom `serialize`), baggage carries `tenantKind`, and one boot line says so. The default carrier also carries `tenant` whenever one is set.
+- `ContextAccessor` gains `tenant()`, `tenancy()` and `tenantFilter()`. A custom accessor bound to `CONTEXT_ACCESSOR` must add them (delegate to `Context`). `ContextModule` now publishes the accessor on the diagnostics global slot even when `@dudousxd/nestjs-diagnostics` is not installed.
+- New "Tenancy" docs page, with the local reader other libs copy.
