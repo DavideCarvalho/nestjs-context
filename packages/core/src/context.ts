@@ -285,8 +285,16 @@ function inputToRef(
   return toTenantRef(input as TenantInput);
 }
 
+/** Throw on a `family` option that is not a non-empty string. */
+function assertFamily(family: unknown): asserts family is string {
+  if (typeof family !== 'string' || family === '') {
+    throw new TypeError('[nestjs-context] `family` must be a non-empty string.');
+  }
+}
+
 /** Write a tenant of a named family (or remove it, with `undefined`). */
 function writeFamily(store: ContextStore, family: string, ref: TenantRef | undefined): void {
+  assertFamily(family);
   const others = familiesOf(store).filter((candidate) => candidate.family !== family);
   if (ref !== undefined) {
     others.push({ ...ref, family });
@@ -465,11 +473,11 @@ function defaultSerialize(store: ContextStore): ContextCarrier {
       c.tenantId = tenantId;
     }
     if (tenant !== undefined) {
-      c.tenant = tenant;
+      c.tenant = copyTenant(tenant);
     }
     const families = familiesOf(store);
     if (families.length > 0) {
-      c.tenantFamilies = [...families];
+      c.tenantFamilies = families.map(copyTenant);
     }
     if (store.userRef !== undefined) {
       c.userRef = store.userRef;
@@ -630,10 +638,17 @@ export const Context = {
     if (store === undefined) {
       return [];
     }
-    const ref =
-      family === undefined
-        ? primaryTenant(store)
-        : familiesOf(store).find((candidate) => candidate.family === family);
+    let ref: TenantRef | undefined;
+    if (family === undefined) {
+      ref = primaryTenant(store);
+    } else {
+      // A primary written with a `family` is matched by `tenantFilter({ family })` too.
+      const primary = primaryTenant(store);
+      ref =
+        primary?.family === family
+          ? primary
+          : familiesOf(store).find((candidate) => candidate.family === family);
+    }
     return ref === undefined ? [] : chainOf(ref);
   },
 
@@ -650,7 +665,9 @@ export const Context = {
    * ```
    *
    * With `{ family }`, it sets (or, with `null`, clears) the tenant of that family
-   * next to the primary tenant, and leaves `tenant`/`tenantId` alone.
+   * next to the primary tenant, and leaves `tenant`/`tenantId` alone. Without it,
+   * `null` clears only the primary tenant; the other families stay (unlike
+   * {@link Context.withTenant}, whose `null` runs `fn` with no tenant at all).
    *
    * Outside an active context it is a no-op with a one-shot warning, like
    * {@link Context.set}. Throws a `TypeError` when the tenant is malformed.

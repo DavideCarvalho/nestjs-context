@@ -206,6 +206,58 @@ describe('carrier', () => {
   });
 });
 
+describe('review fixes', () => {
+  it('the default carrier is a copy: mutating it leaves the request alone', () => {
+    Context.withTenant(nested, () => {
+      Context.withTenant(
+        account,
+        () => {
+          const carrier = Context.serialize() as {
+            tenant: { chain: unknown[] };
+            tenantFamilies: Array<{ id: string }>;
+          };
+          carrier.tenant.chain.push({ id: 'x', kind: 'x' });
+          carrier.tenantFamilies[0]!.id = 'hijacked';
+          expect(Context.tenantChain()).toEqual([clinic, unit]);
+          expect(Context.tenantChain('account')).toEqual([account]);
+        },
+        { family: 'account' },
+      );
+    });
+  });
+
+  it('rejects an empty or non-string family', () => {
+    inStore({}, () => {
+      expect(() => Context.setTenant(account, { family: '' })).toThrow(TypeError);
+      expect(() =>
+        Context.withTenant(account, () => 1, { family: 3 as unknown as string }),
+      ).toThrow(TypeError);
+    });
+  });
+
+  it('tenantChain(family) finds a primary written with that family', () => {
+    Context.withTenant({ ...clinic, family: 'clinic' }, () => {
+      expect(Context.tenantChain('clinic')).toEqual([clinic]);
+    });
+  });
+
+  it('setTenant(null) clears only the primary tenant', () => {
+    inStore({}, () => {
+      Context.setTenant(clinic);
+      Context.setTenant(account, { family: 'account' });
+      Context.setTenant(null);
+      expect(Context.tenant()).toBeUndefined();
+      expect(Context.tenantChain('account')).toEqual([account]);
+    });
+  });
+
+  it('puts E_TENANT_REQUIRED in the HTTP body', () => {
+    const body = new TenantRequiredError().getResponse() as Record<string, unknown>;
+    expect(body).toMatchObject({ statusCode: 403, code: 'E_TENANT_REQUIRED' });
+    expect(new TenantRequiredError('custom').message).toBe('custom');
+  });
+});
+
 describe('required', () => {
   it('throws a 403 TenantRequiredError instead of answering tenantless', () => {
     Context.configure({ tenancy: { enabled: true, required: true } });

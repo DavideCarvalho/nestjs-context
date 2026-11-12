@@ -159,7 +159,8 @@ export class TenantRequiredError extends ForbiddenException {
   constructor(
     message = 'This action needs an active tenant (organization). Select one and retry.',
   ) {
-    super(message);
+    // The code travels in the HTTP body too, so clients can tell this 403 apart.
+    super({ statusCode: 403, error: 'Forbidden', code: 'E_TENANT_REQUIRED', message });
     this.name = 'TenantRequiredError';
   }
 }
