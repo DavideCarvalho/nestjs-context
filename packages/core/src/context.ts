@@ -7,6 +7,17 @@ import {
   encodeUserRef,
   resolveBaggageKeys,
 } from './baggage.js';
+import {
+  type ResolvedTenancy,
+  type TenancyConfig,
+  type TenantFilter,
+  type TenantFilterOptions,
+  type TenantInput,
+  type TenantRef,
+  legacyTenant,
+  resolveTenancy,
+  toTenantRef,
+} from './tenancy.js';
 import { type ParsedTraceparent, extractTraceparent, randomTraceId } from './traceparent.js';
 
 /**
@@ -36,7 +47,18 @@ export interface ContextStore {
   traceId: string;
   requestId?: string;
   userRef?: UserRef;
+  /** The active tenant's id. Always equal to `tenant.id` when a tenant is set. */
   tenantId?: string;
+  /**
+   * The active tenant. Write it with {@link Context.setTenant}, which also sets
+   * `tenantId`. Read it with {@link Context.tenant}.
+   */
+  tenant?: TenantRef;
+  /**
+   * `'all'` inside {@link Context.allTenants}. Process-local: never carried
+   * across a boundary.
+   */
+  tenantScope?: 'all';
   /**
    * The parsed upstream `traceparent` (span-id + trace-flags), captured at
    * request start. Lets a re-emitted `traceparent` faithfully continue the
@@ -54,8 +76,12 @@ export interface ContextStore {
  * refs needed to re-hydrate on the other side. See DESIGN §5.
  */
 export interface ContextCarrier {
+  /** Extra fields a custom `serialize` adds; also lets a carrier pass where a plain record is expected. */
+  [key: string]: unknown;
   traceId: string;
   tenantId?: string;
+  /** The active tenant, when one was set with a kind (see {@link Context.setTenant}). */
+  tenant?: TenantRef;
   userRef?: UserRef;
 }
 
@@ -109,6 +135,11 @@ export interface ContextConfig {
    * values better computed on first use, prefer the lazy {@link Context.lazy}.
    */
   enrichers?: ContextEnricher[];
+  /**
+   * Tenancy: scope data by the active tenant across every lib that inherits it.
+   * Off by default. When on, `tenant` and `tenantId` always ride the carrier.
+   */
+  tenancy?: TenancyConfig;
 }
 
 /**
@@ -121,6 +152,13 @@ export interface ContextConfig {
  * carrier/serialize/deserialize never bleeds into another. See DESIGN §4.1.
  */
 let config: ContextConfig = {};
+
+/** {@link ContextConfig.tenancy} with defaults applied. */
+let tenancy: ResolvedTenancy = resolveTenancy(undefined);
+
+const SYSTEM_FILTER: TenantFilter = Object.freeze({ mode: 'system' as const });
+const ALL_FILTER: TenantFilter = Object.freeze({ mode: 'all' as const });
+const TENANTLESS_FILTER: TenantFilter = Object.freeze({ mode: 'tenantless' as const });
 
 /** Whether {@link Context.configure} has already set a non-empty config. */
 let configured = false;
@@ -135,6 +173,7 @@ function configsConflict(a: ContextConfig, b: ContextConfig): boolean {
     baggageA !== baggageB ||
     a.serialize !== b.serialize ||
     a.deserialize !== b.deserialize ||
+    JSON.stringify(a.tenancy) !== JSON.stringify(b.tenancy) ||
     // Enrichers are function arrays — compare by reference (same approach as the
     // serialize/deserialize fns): a distinct array is treated as a config change.
     a.enrichers !== b.enrichers
@@ -146,6 +185,95 @@ let warnedMissingTraceId = false;
 
 /** One-shot guard so the out-of-context `set` warning is not spammed. */
 let warnedSetOutsideContext = false;
+
+function warnSetOutsideContext(what: string): void {
+  if (!warnedSetOutsideContext) {
+    warnedSetOutsideContext = true;
+    console.warn(
+      `[nestjs-context] ${what} was called with no active context, so it was a no-op and the value was dropped. This usually means the code (e.g. an auth guard) ran on a path the ContextMiddleware did not cover, or outside any Context.run/enterWith scope. Ensure the context is established first. This warning fires once per process.`,
+    );
+  }
+}
+
+/** The stored `tenant`, when it agrees with `tenantId` (a later `tenantId` write wins). */
+function storedTenant(store: ContextStore): TenantRef | undefined {
+  const tenant = store.tenant;
+  if (tenant === undefined || tenant === null) {
+    return undefined;
+  }
+  return store.tenantId === undefined || store.tenantId === tenant.id ? tenant : undefined;
+}
+
+/** The active tenant of a store: the stored ref, else a legacy ref from a plain `tenantId`. */
+function tenantOf(store: ContextStore): TenantRef | undefined {
+  const tenant = storedTenant(store);
+  if (tenant !== undefined) {
+    return tenant;
+  }
+  const id = store.tenantId;
+  return id !== undefined && id !== '' ? legacyTenant(id) : undefined;
+}
+
+/** Set (or clear, with `undefined`) both tenant fields of a store. */
+function writeTenant(store: ContextStore, ref: TenantRef | undefined): void {
+  if (ref === undefined) {
+    // biome-ignore lint/performance/noDelete: an absent key, not an `undefined` one.
+    delete store.tenant;
+    // biome-ignore lint/performance/noDelete: an absent key, not an `undefined` one.
+    delete store.tenantId;
+    return;
+  }
+  store.tenant = ref;
+  store.tenantId = ref.id;
+}
+
+/**
+ * Bring `tenant` and `tenantId` into agreement on a store assembled by hand
+ * (`initialize`, enrichers, a custom `deserialize`): a `tenant` is normalized and
+ * fills a missing `tenantId`; a `tenant` that disagrees with `tenantId`, or is
+ * malformed, is dropped, so `tenantId` wins.
+ */
+export function syncTenantFields(store: ContextStore): ContextStore {
+  const raw = store.tenant as TenantInput | undefined | null;
+  if (raw === undefined) {
+    return store;
+  }
+  let ref: TenantRef | undefined;
+  try {
+    ref = raw === null ? undefined : toTenantRef(raw, raw.source ?? 'app');
+  } catch {
+    ref = undefined;
+  }
+  if (ref === undefined || (store.tenantId !== undefined && store.tenantId !== ref.id)) {
+    // biome-ignore lint/performance/noDelete: an absent key, not an `undefined` one.
+    delete store.tenant;
+    return store;
+  }
+  store.tenant = ref;
+  store.tenantId = ref.id;
+  return store;
+}
+
+/** With tenancy on, put the tenant on a carrier even if the carrier config left it out. */
+function addTenantToCarrier(store: ContextStore, input: ContextCarrier): ContextCarrier {
+  const tenant = tenantOf(store);
+  if (tenant === undefined) {
+    return input;
+  }
+  // A copy: a custom `serialize` may return a frozen or shared object.
+  const carrier: ContextCarrier = { ...input };
+  if (carrier.tenantId === undefined) {
+    carrier.tenantId = tenant.id;
+  }
+  if (
+    carrier.tenant === undefined &&
+    tenant.source !== 'legacy' &&
+    carrier.tenantId === tenant.id
+  ) {
+    carrier.tenant = { ...tenant };
+  }
+  return carrier;
+}
 
 function ensureTraceId(store: ContextStore): ContextStore {
   // A cross-process carrier may arrive missing/empty `traceId` (e.g. produced by
@@ -165,18 +293,39 @@ function ensureTraceId(store: ContextStore): ContextStore {
   return store;
 }
 
+function carriedTenant(carrier: ContextCarrier): TenantRef | undefined {
+  if (carrier.tenant === undefined || carrier.tenant === null) {
+    return undefined;
+  }
+  try {
+    return toTenantRef({ ...carrier.tenant, source: 'carrier' });
+  } catch {
+    return undefined;
+  }
+}
+
 function fromCarrier(carrier: ContextCarrier): ContextStore {
   if (config.deserialize) {
-    return ensureTraceId(config.deserialize(carrier));
+    // A custom `deserialize` is the app's own decision about what it trusts from a
+    // carrier: the tenant is restored only if it returns one (never added behind it).
+    const store = config.deserialize(carrier);
+    // A carrier never grants the `allTenants` bypass.
+    // biome-ignore lint/performance/noDelete: an absent key, not an `undefined` one.
+    delete store.tenantScope;
+    return syncTenantFields(ensureTraceId(store));
   }
   const store: ContextStore = { traceId: carrier.traceId };
   if (carrier.tenantId !== undefined) {
     store.tenantId = carrier.tenantId;
   }
+  const tenant = carriedTenant(carrier);
+  if (tenant !== undefined) {
+    store.tenant = tenant;
+  }
   if (carrier.userRef !== undefined) {
     store.userRef = carrier.userRef;
   }
-  return ensureTraceId(store);
+  return syncTenantFields(ensureTraceId(store));
 }
 
 function defaultSerialize(store: ContextStore): ContextCarrier {
@@ -187,8 +336,13 @@ function defaultSerialize(store: ContextStore): ContextCarrier {
   // default carrier `['traceId', 'tenantId', 'userRef']`.
   if (fields === undefined) {
     const c: ContextCarrier = { traceId: store.traceId };
-    if (store.tenantId !== undefined) {
-      c.tenantId = store.tenantId;
+    const tenant = storedTenant(store);
+    const tenantId = store.tenantId ?? tenant?.id;
+    if (tenantId !== undefined) {
+      c.tenantId = tenantId;
+    }
+    if (tenant !== undefined) {
+      c.tenant = tenant;
     }
     if (store.userRef !== undefined) {
       c.userRef = store.userRef;
@@ -198,7 +352,8 @@ function defaultSerialize(store: ContextStore): ContextCarrier {
   // `traceId` is always present on a carrier.
   const carrier: Record<string, unknown> = { traceId: store.traceId };
   for (const field of fields) {
-    if (field === 'traceId') {
+    // `tenantScope` is the in-process `allTenants` bypass: it never travels.
+    if (field === 'traceId' || field === 'tenantScope') {
       continue;
     }
     const value = store[field];
@@ -206,7 +361,8 @@ function defaultSerialize(store: ContextStore): ContextCarrier {
       carrier[field] = value;
     }
   }
-  return carrier as unknown as ContextCarrier;
+  const result = carrier as unknown as ContextCarrier;
+  return tenancy.enabled ? addTenantToCarrier(store, result) : result;
 }
 
 export const Context = {
@@ -244,15 +400,26 @@ export const Context = {
   set<K extends keyof ContextStore>(key: K, value: ContextStore[K]): void {
     const store = als.getStore();
     if (store) {
+      if (key === 'tenant') {
+        // Same as Context.setTenant: keeps `tenantId` in sync.
+        const input = value as TenantInput | undefined | null;
+        writeTenant(
+          store,
+          input === undefined || input === null
+            ? undefined
+            : toTenantRef(input, input.source ?? 'app'),
+        );
+        return;
+      }
       store[key] = value;
+      if (key === 'tenantId' && store.tenant !== undefined && store.tenant.id !== value) {
+        // A plain `tenantId` write replaces the tenant: it now reads as a legacy ref.
+        // biome-ignore lint/performance/noDelete: an absent key, not an `undefined` one.
+        delete store.tenant;
+      }
       return;
     }
-    if (!warnedSetOutsideContext) {
-      warnedSetOutsideContext = true;
-      console.warn(
-        `[nestjs-context] Context.set(${String(key)}, …) was called with no active context, so it was a no-op and the value was dropped. This usually means the code (e.g. an auth guard) ran on a path the ContextMiddleware did not cover, or outside any Context.run/enterWith scope. Ensure the context is established first. This warning fires once per process.`,
-      );
-    }
+    warnSetOutsideContext(`Context.set(${String(key)}, …)`);
   },
 
   /** Re-arm the one-shot out-of-context `set` warning. Primarily for tests. */
@@ -292,7 +459,104 @@ export const Context = {
   },
 
   tenantId(): string | undefined {
-    return als.getStore()?.tenantId;
+    const store = als.getStore();
+    if (store === undefined) {
+      return undefined;
+    }
+    return store.tenantId ?? storedTenant(store)?.id;
+  },
+
+  /**
+   * The active tenant, or `undefined` when there is none. A store that only has a
+   * plain `tenantId` (from `initialize`, an enricher or an old carrier) reads as
+   * `{ id, kind: 'unknown', source: 'legacy' }`.
+   */
+  tenant(): TenantRef | undefined {
+    const store = als.getStore();
+    const tenant = store === undefined ? undefined : tenantOf(store);
+    // A copy: mutating what a caller got must never rewrite the active store.
+    return tenant === undefined ? undefined : { ...tenant };
+  },
+
+  /**
+   * Set the active tenant on the current context, after the app has resolved it
+   * on the server (from a verified token claim, a membership lookup, …). Writes
+   * `tenant` and `tenantId`; `null` clears both. `source` defaults to `'app'`.
+   *
+   * Outside an active context it is a no-op with a one-shot warning, like
+   * {@link Context.set}. Throws a `TypeError` when the tenant has no `id`.
+   */
+  setTenant(input: TenantInput | null): void {
+    const ref = input === null ? undefined : toTenantRef(input);
+    const store = als.getStore();
+    if (store === undefined) {
+      warnSetOutsideContext('Context.setTenant(…)');
+      return;
+    }
+    writeTenant(store, ref);
+  },
+
+  /**
+   * Run `fn` with `input` as the active tenant (`null` = no tenant), in a copy of
+   * the current store, or in a new store when there is none (scripts, seeders,
+   * webhook handlers, tests). Also leaves any {@link Context.allTenants} scope.
+   */
+  withTenant<T>(input: TenantInput | null, fn: () => T): T {
+    const ref = input === null ? undefined : toTenantRef(input);
+    const current = als.getStore();
+    const store: ContextStore = current ? { ...current } : { traceId: randomTraceId() };
+    // biome-ignore lint/performance/noDelete: an absent key, not an `undefined` one.
+    delete store.tenantScope;
+    writeTenant(store, ref);
+    return als.run(store, fn);
+  },
+
+  /**
+   * Run `fn` with access to every tenant's data: `tenantFilter()` answers
+   * `{ mode: 'all' }` inside it. The explicit escape hatch for admin and
+   * maintenance code. Never carried across a boundary.
+   */
+  allTenants<T>(fn: () => T): T {
+    const current = als.getStore();
+    const store: ContextStore = current ? { ...current } : { traceId: randomTraceId() };
+    store.tenantScope = 'all';
+    return als.run(store, fn);
+  },
+
+  /** The resolved `tenancy` option: `{ enabled, kinds? }`. */
+  tenancy(): ResolvedTenancy {
+    const out: ResolvedTenancy = { enabled: tenancy.enabled };
+    if (tenancy.kinds !== undefined) {
+      out.kinds = [...tenancy.kinds];
+    }
+    return out;
+  },
+
+  /**
+   * How a lib must scope data right now:
+   * - `system`: no active context. Do not filter.
+   * - `all`: inside {@link Context.allTenants}. Do not filter.
+   * - `tenantless`: a context with no tenant, or with a tenant whose kind is not
+   *   in `kinds` (the lib's, else the context's). Only rows with no tenant.
+   * - `tenant`: only this tenant's rows; stamp writes with `tenant.id`.
+   *
+   * It does not check `tenancy().enabled`: the lib decides whether tenancy is on
+   * for it, then asks for the filter.
+   */
+  tenantFilter(options?: TenantFilterOptions): TenantFilter {
+    const store = als.getStore();
+    if (store === undefined) {
+      return SYSTEM_FILTER;
+    }
+    if (store.tenantScope === 'all') {
+      return ALL_FILTER;
+    }
+    const tenant = tenantOf(store);
+    const kinds = options?.kinds ?? tenancy.kinds;
+    if (tenant !== undefined && (kinds === undefined || kinds.includes(tenant.kind))) {
+      return { mode: 'tenant', tenant: { ...tenant } };
+    }
+    return TENANTLESS_FILTER;
   },
 
   userRef(): UserRef | undefined {
@@ -336,6 +600,9 @@ export const Context = {
     if (next.enrichers !== undefined) {
       replacement.enrichers = next.enrichers;
     }
+    if (next.tenancy !== undefined) {
+      replacement.tenancy = next.tenancy;
+    }
 
     if (configured && configsConflict(config, replacement)) {
       console.warn(
@@ -347,12 +614,14 @@ export const Context = {
     }
 
     config = replacement;
+    tenancy = resolveTenancy(replacement.tenancy);
     configured = true;
   },
 
   /** Reset the singleton config to its defaults. Primarily for tests. */
   resetConfig(): void {
     config = {};
+    tenancy = resolveTenancy(undefined);
     configured = false;
   },
 
@@ -367,7 +636,12 @@ export const Context = {
     if (!store) {
       return undefined;
     }
-    return config.serialize ? config.serialize(store) : defaultSerialize(store);
+    if (!config.serialize) {
+      return defaultSerialize(store);
+    }
+    // A custom `serialize` is the app's own decision about what crosses a boundary:
+    // the tenant travels only if it puts it there.
+    return config.serialize(store);
   },
 
   /** Re-hydrate a context from a carrier and run `fn` inside it. */
@@ -393,8 +667,13 @@ export const Context = {
     }
     const keys = resolveBaggageKeys(config.baggage);
     const entries: Record<string, string> = {};
-    if (keys.tenantId !== false && store.tenantId !== undefined) {
-      entries[keys.tenantId] = store.tenantId;
+    const tenantId = store.tenantId ?? storedTenant(store)?.id;
+    if (keys.tenantId !== false && tenantId !== undefined) {
+      entries[keys.tenantId] = tenantId;
+      const tenant = storedTenant(store);
+      if (tenancy.enabled && keys.tenantKind !== false && tenant !== undefined) {
+        entries[keys.tenantKind] = tenant.kind;
+      }
     }
     if (keys.userRef !== false && store.userRef !== undefined) {
       entries[keys.userRef] = encodeUserRef(store.userRef);
@@ -430,6 +709,10 @@ export const Context = {
       const tenantId = decoded[keys.tenantId];
       if (tenantId !== undefined) {
         store.tenantId = tenantId;
+        const kind = keys.tenantKind !== false ? decoded[keys.tenantKind] : undefined;
+        if (tenancy.enabled && tenantId !== '' && kind !== undefined && kind !== '') {
+          store.tenant = { id: tenantId, kind, source: 'carrier' };
+        }
       }
     }
     if (keys.userRef !== false) {
@@ -474,6 +757,7 @@ export const Context = {
         // An enricher must never break the request or the other enrichers.
       }
     }
+    syncTenantFields(store);
   },
 
   /**

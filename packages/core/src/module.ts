@@ -1,6 +1,7 @@
 import {
   type DynamicModule,
   Inject,
+  Logger,
   type MiddlewareConsumer,
   Module,
   type NestModule,
@@ -21,6 +22,19 @@ import type {
   ContextModuleOptions,
   ContextModuleOptionsFactory,
 } from './types.js';
+
+/** The one boot line saying tenancy is on and how the carrier is affected. */
+function tenancyBootLine(options: ContextModuleOptions): string {
+  const head = 'Tenancy is on: libs that inherit it scope data by the active tenant.';
+  if (options.serialize !== undefined) {
+    return `${head} Your custom \`serialize\`/\`deserialize\` decides whether the tenant crosses process boundaries.`;
+  }
+  const carrier = options.carrier;
+  if (carrier !== undefined && !(carrier.includes('tenant') && carrier.includes('tenantId'))) {
+    return `${head} \`tenant\` and \`tenantId\` ride every carrier, even though \`carrier\` does not list them.`;
+  }
+  return `${head} \`tenant\` and \`tenantId\` ride every carrier.`;
+}
 
 /**
  * Global module that wires the per-request context: registers
@@ -48,6 +62,9 @@ export class ContextModule implements NestModule, OnModuleInit {
    */
   async onModuleInit(): Promise<void> {
     Context.configure(this.options);
+    if (Context.tenancy().enabled) {
+      new Logger('ContextModule').log(tenancyBootLine(this.options));
+    }
     await wireContextIntoDiagnostics();
   }
 

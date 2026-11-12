@@ -33,7 +33,7 @@ import { Context } from '@dudousxd/nestjs-context';
 // producer (where you enqueue) — snapshot the active context:
 await queue.add('send-email', {
   to: 'a@b.com',
-  __ctx: Context.serialize(), // { traceId, tenantId?, userRef? } | undefined
+  __ctx: Context.serialize(), // { traceId, tenantId?, tenant?, userRef? } | undefined
 });
 
 // consumer (the worker) — run the handler inside the re-hydrated context:
@@ -46,7 +46,8 @@ worker.process(async (job) => {
 ```
 
 The carrier carries no user entity and no DB connection — just the refs needed to
-re-hydrate. By default it is `{ traceId, tenantId, userRef }`.
+re-hydrate. By default it is `{ traceId, tenantId, tenant, userRef }` (tenant
+fields only when set).
 
 # Core Patterns
 
@@ -71,7 +72,7 @@ active at bind time it returns the function unchanged (runs with no context).
 
 ## Include a custom field in the carrier
 
-The default carrier is only `traceId`/`tenantId`/`userRef`. To make a
+The default carrier is only `traceId`/`tenantId`/`tenant`/`userRef`. To make a
 module-augmented field survive the boundary, list it in `carrier`.
 
 ```ts
@@ -81,7 +82,12 @@ ContextModule.forRoot({
 ```
 
 Or take full control with `serialize` / `deserialize` overrides (set both
-together so a producer and consumer never mismatch).
+together so a producer and consumer never mismatch). A custom `serialize` /
+`deserialize` decides for itself: the tenant crosses only if your `serialize`
+writes it, and is restored only if your `deserialize` returns it — it is never
+added behind either one, even when `tenancy.enabled` is true. (The `carrier`
+list is different: with tenancy on, `tenant`/`tenantId` ride even when the
+list leaves them out.)
 
 ## With the official @nestjs/authentication
 
@@ -122,6 +128,9 @@ Map fields to namespaced keys (or disable one) via the `baggage` option:
 ```ts
 ContextModule.forRoot({ baggage: { tenantId: 'acme.tenant', userRef: false } });
 ```
+
+When `tenancy.enabled` is true, baggage also carries `tenantKind` next to
+`tenantId` (tune via `baggage.tenantKind`).
 
 ## Re-emit a faithful downstream traceparent
 
@@ -176,7 +185,10 @@ Correct:
 ContextModule.forRoot({ carrier: ['traceId', 'tenantId', 'userRef', 'locale'] });
 ```
 
-`serialize()` only copies the carrier fields; an augmented field defaults out and
+The default `serialize()` only copies the carrier fields — plus `tenant`
+whenever one is set, even with tenancy off. A custom `carrier` list is
+different: with `tenancy.enabled` it always adds `tenant`/`tenantId` even when
+the list leaves them out. An augmented field defaults out and
 silently arrives `undefined` on the worker side.
 
 Source: packages/core/src/context.ts:182; packages/core/src/types.ts:65
