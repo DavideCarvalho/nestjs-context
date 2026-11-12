@@ -84,9 +84,17 @@ export function toTenantRef(input: TenantInput, fallbackSource: TenantSource = '
   if (id === '') {
     throw new TypeError('[nestjs-context] A tenant needs a non-empty `id`.');
   }
+  if (typeof input.kind !== 'string' || input.kind === '') {
+    throw new TypeError('[nestjs-context] A tenant needs a non-empty string `kind`.');
+  }
+  for (const key of ['slug', 'role'] as const) {
+    if (input[key] !== undefined && typeof input[key] !== 'string') {
+      throw new TypeError(`[nestjs-context] A tenant's \`${key}\` must be a string.`);
+    }
+  }
   const ref: TenantRef = {
     id,
-    kind: input.kind || 'unknown',
+    kind: input.kind,
     source: input.source ?? fallbackSource,
   };
   if (input.slug !== undefined) ref.slug = input.slug;

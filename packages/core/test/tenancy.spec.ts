@@ -425,3 +425,35 @@ describe('the local reader snippet', () => {
     expect(docs).toContain(snippet.trim());
   });
 });
+
+describe('review hardening', () => {
+  it('a frozen carrier from a custom serialize is copied, not written in place', () => {
+    Context.configure({
+      tenancy: { enabled: true },
+      serialize: () => Object.freeze({ traceId: 'x' }),
+    });
+    const carrier = Context.withTenant(acme, () => Context.serialize());
+    expect(carrier).toMatchObject({ traceId: 'x', tenantId: 'org_1', tenant: { id: 'org_1' } });
+  });
+
+  it('tenant() and tenantFilter() hand out copies: mutating them never rewrites the store', () => {
+    Context.withTenant(acme, () => {
+      const got = Context.tenant()!;
+      (got as { id: string }).id = 'evil';
+      const filter = Context.tenantFilter();
+      if (filter.mode === 'tenant') (filter.tenant as { id: string }).id = 'evil';
+      expect(Context.tenant()?.id).toBe('org_1');
+      expect(Context.tenantId()).toBe('org_1');
+    });
+  });
+
+  it('a tenant needs a non-empty string kind; slug and role must be strings', () => {
+    inStore({}, () => {
+      expect(() => Context.setTenant({ id: 'x' } as never)).toThrow(/non-empty string `kind`/);
+      expect(() => Context.setTenant({ id: 'x', kind: '' })).toThrow(/non-empty string `kind`/);
+      expect(() => Context.setTenant({ id: 'x', kind: 1 } as never)).toThrow(/kind/);
+      expect(() => Context.setTenant({ id: 'x', kind: 'org', slug: 2 } as never)).toThrow(/slug/);
+      expect(() => Context.setTenant({ id: 'x', kind: 'org', role: {} } as never)).toThrow(/role/);
+    });
+  });
+});

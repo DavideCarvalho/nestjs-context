@@ -253,11 +253,13 @@ export function syncTenantFields(store: ContextStore): ContextStore {
 }
 
 /** With tenancy on, put the tenant on a carrier even if the carrier config left it out. */
-function addTenantToCarrier(store: ContextStore, carrier: ContextCarrier): ContextCarrier {
+function addTenantToCarrier(store: ContextStore, input: ContextCarrier): ContextCarrier {
   const tenant = tenantOf(store);
   if (tenant === undefined) {
-    return carrier;
+    return input;
   }
+  // A copy: a custom `serialize` may return a frozen or shared object.
+  const carrier: ContextCarrier = { ...input };
   if (carrier.tenantId === undefined) {
     carrier.tenantId = tenant.id;
   }
@@ -266,7 +268,7 @@ function addTenantToCarrier(store: ContextStore, carrier: ContextCarrier): Conte
     tenant.source !== 'legacy' &&
     carrier.tenantId === tenant.id
   ) {
-    carrier.tenant = tenant;
+    carrier.tenant = { ...tenant };
   }
   return carrier;
 }
@@ -473,7 +475,9 @@ export const Context = {
    */
   tenant(): TenantRef | undefined {
     const store = als.getStore();
-    return store === undefined ? undefined : tenantOf(store);
+    const tenant = store === undefined ? undefined : tenantOf(store);
+    // A copy: mutating what a caller got must never rewrite the active store.
+    return tenant === undefined ? undefined : { ...tenant };
   },
 
   /**
@@ -552,7 +556,7 @@ export const Context = {
     const tenant = tenantOf(store);
     const kinds = options?.kinds ?? tenancy.kinds;
     if (tenant !== undefined && (kinds === undefined || kinds.includes(tenant.kind))) {
-      return { mode: 'tenant', tenant };
+      return { mode: 'tenant', tenant: { ...tenant } };
     }
     return TENANTLESS_FILTER;
   },
