@@ -33,7 +33,7 @@ import { Context } from '@dudousxd/nestjs-context';
 // producer (where you enqueue) — snapshot the active context:
 await queue.add('send-email', {
   to: 'a@b.com',
-  __ctx: Context.serialize(), // { traceId, tenantId?, tenant?, userRef? } | undefined
+  __ctx: Context.serialize(), // { traceId, tenantId?, tenant?, tenantFamilies?, userRef? } | undefined
 });
 
 // consumer (the worker) — run the handler inside the re-hydrated context:
@@ -46,8 +46,8 @@ worker.process(async (job) => {
 ```
 
 The carrier carries no user entity and no DB connection — just the refs needed to
-re-hydrate. By default it is `{ traceId, tenantId, tenant, userRef }` (tenant
-fields only when set).
+re-hydrate. By default it is `{ traceId, tenantId, tenant, tenantFamilies, userRef }`
+(tenant fields only when set; `tenant` keeps its `chain`).
 
 # Core Patterns
 
@@ -187,8 +187,9 @@ ContextModule.forRoot({ carrier: ['traceId', 'tenantId', 'userRef', 'locale'] })
 
 The default `serialize()` only copies the carrier fields — plus `tenant`
 whenever one is set, even with tenancy off. A custom `carrier` list is
-different: with `tenancy.enabled` it always adds `tenant`/`tenantId` even when
-the list leaves them out. An augmented field defaults out and
+different: with `tenancy.enabled` it always adds `tenant`/`tenantId` (and
+`tenantFamilies`, when set) even when the list leaves them out. A personal tenant
+(`tenancy.personal`) is never carried: the `userRef` re-derives it. An augmented field defaults out and
 silently arrives `undefined` on the worker side.
 
 Source: packages/core/src/context.ts:182; packages/core/src/types.ts:65

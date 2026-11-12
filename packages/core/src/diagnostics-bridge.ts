@@ -1,5 +1,5 @@
 import type { ContextAccessor as DiagnosticsContextAccessor } from '@dudousxd/nestjs-diagnostics';
-import { contextAccessor } from './accessor.js';
+import { CONTEXT_TENANCY_SLOT, contextAccessor, tenancySlot } from './accessor.js';
 
 /**
  * The global slot `@dudousxd/nestjs-diagnostics` keeps its context accessor in:
@@ -13,7 +13,8 @@ interface AccessorHolder {
 }
 
 /**
- * Publish {@link contextAccessor} on the diagnostics global slot, and register it
+ * Publish {@link contextAccessor} on the diagnostics global slot and
+ * {@link tenancySlot} on `Symbol.for('@dudousxd/nestjs-context:tenancy')`, and register it
  * with `@dudousxd/nestjs-diagnostics` (an OPTIONAL peer) when installed.
  *
  * The slot is written structurally first, so libs that read the context outside
@@ -34,6 +35,9 @@ export async function wireContextIntoDiagnostics(): Promise<void> {
   } else {
     slots[DIAGNOSTICS_ACCESSOR_SLOT] = { current: contextAccessor };
   }
+  // The versioned tenancy contract (read and write) for libs that need more than
+  // the accessor, e.g. to restore a tenant around resumed work.
+  (globalThis as Record<symbol, unknown>)[CONTEXT_TENANCY_SLOT] = tenancySlot;
   try {
     const diagnostics = await import('@dudousxd/nestjs-diagnostics');
     // The two `ContextAccessor` shapes are identical for diagnostics' purposes (it

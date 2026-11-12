@@ -6,8 +6,9 @@ description: >
   module, the ContextMiddleware that seeds traceId/requestId from the W3C
   traceparent header via enterWith, and the autoMiddleware/forRoutes/exclude
   options. Load when setting up the module, choosing forRoot vs forRootAsync,
-  reading Context.traceId/tenantId/userRef, or establishing context outside HTTP
-  (GraphQL/gRPC/queue) with Context.run / Context.enterWith.
+  reading Context.traceId/tenantId/userRef, turning on tenancy (setTenant, nested
+  tenant chains, families, required, personal, labels), or establishing context
+  outside HTTP (GraphQL/gRPC/queue) with Context.run / Context.enterWith.
 metadata:
   type: core
   library: '@dudousxd/nestjs-context'
@@ -17,6 +18,7 @@ sources:
   - DavideCarvalho/nestjs-context:packages/core/src/module.ts
   - DavideCarvalho/nestjs-context:packages/core/src/middleware.ts
   - DavideCarvalho/nestjs-context:packages/core/src/types.ts
+  - DavideCarvalho/nestjs-context:packages/core/src/tenancy.ts
   - DavideCarvalho/nestjs-context:DESIGN.md
 ---
 
@@ -128,6 +130,31 @@ ContextModule.forRoot({
   exclude: ['health', 'metrics'],
 });
 ```
+
+## Tenancy: the tenant every lib scopes by
+
+```ts
+ContextModule.forRoot({
+  tenancy: {
+    enabled: true,          // off by default
+    kinds: ['clinic'],      // optional: the level(s) libs scope by
+    required: true,         // optional: no tenant -> TenantRequiredError (403)
+    personal: true,         // optional: a user with no tenant is a { kind: 'user' } tenant
+    label: async (t) => (await orgs.find(t.id))?.name, // optional: console picker labels
+  },
+});
+
+// In a guard, after the server verified who the tenant is:
+Context.setTenant({ id: unit.id, kind: 'unit', chain: [{ id: clinic.id, kind: 'clinic' }] });
+Context.setTenant({ id: account.id, kind: 'account' }, { family: 'account' });
+Context.setTenant({ kind: 'user' }); // personal: id from userRef
+
+Context.tenant(); Context.tenants(); Context.tenantChain(); Context.requireTenant();
+await Context.withTenant(ref, () => importInvoices()); // scripts, webhooks, tests
+await Context.allTenants(() => adminReport());        // the only bypass
+```
+
+Never take the tenant from a client header or query parameter.
 
 # Common Mistakes
 

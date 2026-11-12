@@ -16,14 +16,19 @@ export type {
   UserRef,
 } from './context.js';
 export type {
+  PersonalTenantInput,
   ResolvedTenancy,
+  SetTenantOptions,
   TenancyConfig,
   TenantFilter,
   TenantFilterOptions,
   TenantInput,
+  TenantLabelResolver,
+  TenantLevel,
   TenantRef,
   TenantSource,
 } from './tenancy.js';
+export { TenantRequiredError } from './tenancy.js';
 export {
   type Baggage,
   type BaggageKeyMap,
@@ -32,8 +37,8 @@ export {
   encodeBaggage,
   encodeUserRef,
 } from './baggage.js';
-export { contextAccessor } from './accessor.js';
-export type { ContextAccessor } from './accessor.js';
+export { CONTEXT_TENANCY_SLOT, contextAccessor, tenancySlot } from './accessor.js';
+export type { ContextAccessor, TenancySlot } from './accessor.js';
 export { ContextMiddleware } from './middleware.js';
 export { ContextModule } from './module.js';
 export { ContextRunner } from './runner.js';
