@@ -29,7 +29,7 @@ ContextModule.forRoot({
 
 When `enabled` is true:
 
-- `tenant` and `tenantId` always ride the cross-process carrier, even if your `carrier` list leaves them out, and even with a custom `serialize`.
+- `tenant` and `tenantId` always ride the default cross-process carrier, even if your `carrier` list leaves them out. A custom `serialize`/`deserialize` decides for itself (see [Across process boundaries](#across-process-boundaries)).
 - `Context.toBaggage()` also sends the tenant's kind as `tenantKind`.
 - One `info` line at boot says tenancy is on.
 

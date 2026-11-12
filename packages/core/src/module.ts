@@ -27,7 +27,7 @@ import type {
 function tenancyBootLine(options: ContextModuleOptions): string {
   const head = 'Tenancy is on: libs that inherit it scope data by the active tenant.';
   if (options.serialize !== undefined) {
-    return `${head} \`tenant\` and \`tenantId\` are added to the output of your custom \`serialize\` when it leaves them out.`;
+    return `${head} Your custom \`serialize\`/\`deserialize\` decides whether the tenant crosses process boundaries.`;
   }
   const carrier = options.carrier;
   if (carrier !== undefined && !(carrier.includes('tenant') && carrier.includes('tenantId'))) {
