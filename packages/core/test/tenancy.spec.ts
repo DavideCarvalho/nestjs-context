@@ -246,15 +246,33 @@ describe('carrier', () => {
     expect(carrier).not.toHaveProperty('tenantId');
   });
 
-  it('tenancy on: a custom serialize/deserialize still carries the tenant', () => {
+  it('tenancy on: a custom serialize/deserialize decides; the tenant is never added behind it', () => {
     Context.configure({
       serialize: (s) => ({ traceId: s.traceId }),
       deserialize: (c) => ({ traceId: c.traceId }),
       tenancy: { enabled: true },
     });
     const carrier = Context.withTenant(acme, () => Context.serialize());
-    expect(carrier?.tenantId).toBe('org_1');
-    Context.deserialize(carrier!, () => expect(Context.tenant()?.kind).toBe('organization'));
+    expect(carrier).toEqual({ traceId: expect.any(String) });
+    // A forged or stale tenant on an incoming carrier is not restored past the app's deserialize.
+    Context.deserialize(
+      { traceId: 't', tenant: { id: 'forged', kind: 'organization' } } as never,
+      () => {
+        expect(Context.tenant()).toBeUndefined();
+        expect(Context.tenantId()).toBeUndefined();
+        expect(Context.tenantFilter()).toEqual({ mode: 'tenantless' });
+      },
+    );
+  });
+
+  it('tenancy on: a custom serialize/deserialize that carries the tenant restores it', () => {
+    Context.configure({
+      serialize: (s) => ({ traceId: s.traceId, tenant: s.tenant }),
+      deserialize: (c) => ({ traceId: c.traceId, tenant: c.tenant }),
+      tenancy: { enabled: true },
+    });
+    const carrier = Context.withTenant(acme, () => Context.serialize());
+    Context.deserialize(carrier!, () => expect(Context.tenant()?.id).toBe('org_1'));
   });
 
   it('never carries the allTenants bypass', () => {
@@ -427,13 +445,19 @@ describe('the local reader snippet', () => {
 });
 
 describe('review hardening', () => {
-  it('a frozen carrier from a custom serialize is copied, not written in place', () => {
+  it('a frozen carrier from a custom serialize is returned as is (never written to)', () => {
     Context.configure({
       tenancy: { enabled: true },
       serialize: () => Object.freeze({ traceId: 'x' }),
     });
     const carrier = Context.withTenant(acme, () => Context.serialize());
-    expect(carrier).toMatchObject({ traceId: 'x', tenantId: 'org_1', tenant: { id: 'org_1' } });
+    expect(carrier).toEqual({ traceId: 'x' });
+  });
+
+  it('a ContextCarrier passes where a plain record is expected (e.g. durable `context`)', () => {
+    const accept = (_: Record<string, unknown>) => true;
+    const carrier = Context.withTenant(acme, () => Context.serialize());
+    expect(accept(carrier!)).toBe(true);
   });
 
   it('tenant() and tenantFilter() hand out copies: mutating them never rewrites the store', () => {

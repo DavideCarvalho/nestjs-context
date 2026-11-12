@@ -76,6 +76,8 @@ export interface ContextStore {
  * refs needed to re-hydrate on the other side. See DESIGN §5.
  */
 export interface ContextCarrier {
+  /** Extra fields a custom `serialize` adds; also lets a carrier pass where a plain record is expected. */
+  [key: string]: unknown;
   traceId: string;
   tenantId?: string;
   /** The active tenant, when one was set with a kind (see {@link Context.setTenant}). */
@@ -304,13 +306,9 @@ function carriedTenant(carrier: ContextCarrier): TenantRef | undefined {
 
 function fromCarrier(carrier: ContextCarrier): ContextStore {
   if (config.deserialize) {
+    // A custom `deserialize` is the app's own decision about what it trusts from a
+    // carrier: the tenant is restored only if it returns one (never added behind it).
     const store = config.deserialize(carrier);
-    if (tenancy.enabled && store.tenant === undefined) {
-      const tenant = carriedTenant(carrier);
-      if (tenant !== undefined && (store.tenantId === undefined || store.tenantId === tenant.id)) {
-        store.tenant = tenant;
-      }
-    }
     // A carrier never grants the `allTenants` bypass.
     // biome-ignore lint/performance/noDelete: an absent key, not an `undefined` one.
     delete store.tenantScope;
@@ -641,8 +639,9 @@ export const Context = {
     if (!config.serialize) {
       return defaultSerialize(store);
     }
-    const carrier = config.serialize(store);
-    return tenancy.enabled ? addTenantToCarrier(store, carrier) : carrier;
+    // A custom `serialize` is the app's own decision about what crosses a boundary:
+    // the tenant travels only if it puts it there.
+    return config.serialize(store);
   },
 
   /** Re-hydrate a context from a carrier and run `fn` inside it. */

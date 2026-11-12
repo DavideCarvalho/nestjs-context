@@ -147,7 +147,7 @@ The default `'inherit'` follows the context switch. `false` keeps one lib out of
 
 ## Across process boundaries
 
-The tenant travels with the rest of the context, so a queued job or a durable step runs in the tenant that dispatched it:
+The tenant travels with the rest of the context, so a queued job runs in the tenant that dispatched it:
 
 ```ts
 await queue.add('send-invoice', { ...payload, __ctx: Context.serialize() });
@@ -156,7 +156,9 @@ await queue.add('send-invoice', { ...payload, __ctx: Context.serialize() });
 Context.deserialize(job.data.__ctx, () => handler(job)); // Context.tenant() is restored, source 'carrier'
 ```
 
-The default carrier includes `tenant` when one is set. With tenancy on, it is added even when your `carrier` list or custom `serialize` leaves it out. See [Cross-Process](/docs/context/cross-process).
+The default carrier includes `tenant` when one is set. With tenancy on, it is added even when your `carrier` list leaves it out. A custom `serialize`/`deserialize` is your own decision: the tenant crosses the boundary only if your `serialize` writes it and is restored only if your `deserialize` returns it. Use that to keep the tenant off carriers you don't trust. See [Cross-Process](/docs/context/cross-process).
+
+A library that keeps work running after the request (a durable run resumed by a timer, a scheduled job) must store the tenant with that work and restore it itself; a context carrier alone only covers the hop it was attached to.
 
 Over W3C baggage, `toBaggage()` sends `tenantId` and, with tenancy on, `tenantKind`. `fromBaggage()` restores the tenant only from a header that carries both. Only call `fromBaggage` on traffic from services you trust.
 
