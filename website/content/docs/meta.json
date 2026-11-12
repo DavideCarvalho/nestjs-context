@@ -8,6 +8,7 @@
     "cross-process",
     "tenancy",
     "authentication",
-    "testing"
+    "testing",
+    "upgrading"
   ]
 }
