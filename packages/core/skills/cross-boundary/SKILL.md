@@ -126,6 +126,9 @@ Map fields to namespaced keys (or disable one) via the `baggage` option:
 ContextModule.forRoot({ baggage: { tenantId: 'acme.tenant', userRef: false } });
 ```
 
+When `tenancy.enabled` is true, baggage also carries `tenantKind` next to
+`tenantId` (tune via `baggage.tenantKind`).
+
 ## Re-emit a faithful downstream traceparent
 
 `toTraceparent` continues the upstream trace when the request captured one
@@ -179,7 +182,8 @@ Correct:
 ContextModule.forRoot({ carrier: ['traceId', 'tenantId', 'userRef', 'locale'] });
 ```
 
-`serialize()` only copies the carrier fields; an augmented field defaults out and
+`serialize()` only copies the carrier fields (plus `tenant`/`tenantId` always when
+`tenancy.enabled` is true); an augmented field defaults out and
 silently arrives `undefined` on the worker side.
 
 Source: packages/core/src/context.ts:182; packages/core/src/types.ts:65
