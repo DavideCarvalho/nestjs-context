@@ -25,7 +25,10 @@ ContextModule.forRoot({
 | Option | Default | What it does |
 |--------|---------|--------------|
 | `enabled` | `false` | The single switch. Every lib whose own `tenancy` option is `'inherit'` (their default) starts scoping data by the tenant. |
-| `kinds` | all kinds | Allow-list of tenant kinds. A tenant of another kind counts as no tenant. |
+| `kinds` | all kinds | Allow-list of tenant kinds. With [nested tenants](#nested-tenants), libs scope by the most specific level whose kind is listed. A tenant with no listed level counts as no tenant. |
+| `required` | `false` | A tenant-scoped read or write with no tenant throws `TenantRequiredError` (403) instead of using the rows that have no tenant. See [Require a tenant](#require-a-tenant). |
+| `personal` | `false` | A signed-in user with no tenant counts as their own `{ kind: 'user' }` tenant. See [Personal tenants](#personal-tenants). |
+| `label` | none | `(tenant) => string \| undefined \| Promise<…>`: the display name consoles show in their "Organization" picker. See [Labels](#labels). |
 
 When `enabled` is true:
 
@@ -70,6 +73,50 @@ export class OrgGuard implements CanActivate {
   Take the tenant from something the server verified: a signed token claim, a session, a membership lookup. Never take it straight from a client header or query parameter.
 </Callout>
 
+### Nested tenants
+
+When tenants nest (a clinic with units), set the most specific one and pass the levels above it as `chain`, root first:
+
+```ts
+Context.setTenant({
+  id: unit.id,
+  kind: 'unit',
+  chain: [{ id: clinic.id, kind: 'clinic', slug: clinic.slug }],
+});
+
+Context.tenant();      // { id: 'u1', kind: 'unit', source: 'app', chain: [clinic, unit] }
+Context.tenantChain(); // [{ id: 'c1', kind: 'clinic', slug: 'sunny' }, { id: 'u1', kind: 'unit' }]
+Context.tenantId();    // 'u1'
+```
+
+Each lib scopes by the level its `kinds` name: a lib with `kinds: ['clinic']` stamps and filters rows by the clinic, another with `kinds: ['unit']` by the unit. Without `kinds`, libs use the most specific level.
+
+### Several tenant families
+
+A request can also belong to tenants that are not part of the same hierarchy, for example a patient's own `account` next to the clinic. Set those with a `family`:
+
+```ts
+Context.setTenant({ id: clinic.id, kind: 'clinic' });
+Context.setTenant({ id: account.id, kind: 'account' }, { family: 'account' });
+
+Context.tenant();             // the clinic: the primary tenant, the one tenantId mirrors
+Context.tenants();            // [clinic, { ...account, family: 'account' }]
+Context.tenantChain('account');
+Context.setTenant(null, { family: 'account' }); // clears only that family
+```
+
+A lib uses another family only when its `kinds` name that family's kind (`kinds: ['account']`) or its `family` option names it. Otherwise libs see only the primary tenant.
+
+### Personal tenants
+
+With `personal: true`, a signed-in user (`userRef`) who has no tenant is treated as a tenant of their own, `{ id: userRef.id, kind: 'user', source: 'personal' }`. The libs then keep each user's data apart, the same way they do for organizations. You can also switch to it explicitly, for example when the user picks "Personal" in an organization switcher:
+
+```ts
+Context.setTenant({ kind: 'user' }); // the id comes from the context's userRef
+```
+
+Without `personal: true`, `setTenant({ kind: 'user' })` without an `id` throws. A user tenant with an explicit `id` is always accepted.
+
 Apps that already put a `tenantId` in the store through `initialize`, an enricher or `Context.set('tenantId', …)` keep working. A plain `tenantId` reads as `{ id, kind: 'unknown', source: 'legacy' }`. Set a `kind` with `setTenant` (or return a `tenant` from `initialize`) when you use `kinds`, because a tenant of kind `'unknown'` never matches a `kinds` list.
 
 ---
@@ -79,7 +126,10 @@ Apps that already put a `tenantId` in the store through `initialize`, an enriche
 ```ts
 Context.tenant();   // { id: 'org_1', kind: 'organization', source: 'app', slug: 'acme' } | undefined
 Context.tenantId(); // 'org_1' | undefined, always equal to tenant()?.id
-Context.tenancy();  // { enabled: true, kinds: ['organization'] }
+Context.tenancy();  // { enabled: true, kinds: ['organization'], required: false, personal: false }
+Context.tenants();  // the primary tenant first, then the other families
+Context.tenantChain(); // the primary tenant's levels, root first
+Context.requireTenant(); // the tenant, or throws TenantRequiredError
 ```
 
 A `TenantRef` has these fields:
@@ -88,9 +138,50 @@ A `TenantRef` has these fields:
 |-------|---------|
 | `id` | Stable key. Libs stamp and compare rows by it. |
 | `kind` | `'organization'`, `'user'`, or any string of your own (`'clinic'`). `'unknown'` for a plain `tenantId`. |
-| `source` | `'app'` (set in this process), `'carrier'` (restored from a carrier or baggage), `'legacy'` (only a plain `tenantId`). |
+| `source` | `'app'` (set in this process), `'carrier'` (restored from a carrier or baggage), `'personal'` (the signed-in user, see `personal`), `'legacy'` (only a plain `tenantId`). |
 | `slug` | Display only, never a key. |
 | `role` | The caller's role inside this tenant. Display and authorization input only. |
+| `chain` | The levels when tenants nest, root first and this tenant last. Absent for a flat tenant. |
+| `family` | The family name, on tenants set with `{ family }`. |
+
+---
+
+## Require a tenant
+
+Turn on `required` when every tenant-scoped piece of data must belong to a tenant:
+
+```ts
+ContextModule.forRoot({ tenancy: { enabled: true, required: true } });
+```
+
+A lib that reads or writes tenant data in a request with no tenant then throws `TenantRequiredError`, a `403 Forbidden` with `code: 'E_TENANT_REQUIRED'`, instead of using the rows that have no tenant. Work with no context at all (boot, internal workers) and `Context.allTenants()` still run. A lib can keep a path open without a tenant with its own `tenancy: { required: false }`.
+
+For a route that needs a tenant regardless of the config, call `Context.requireTenant()` (or `requireTenant({ kinds: ['clinic'] })`) at the top of the handler.
+
+---
+
+## Labels
+
+Consoles show an "Organization" picker. By default it shows each tenant's `slug`, else its id. Give it real names with `label`:
+
+```ts
+ContextModule.forRootAsync({
+  imports: [OrgsModule],
+  inject: [OrgsService],
+  useFactory: (orgs: OrgsService) => ({
+    tenancy: {
+      enabled: true,
+      label: async (tenant) =>
+        tenant.kind === 'organization' ? (await orgs.find(tenant.id))?.name : undefined,
+    },
+  }),
+});
+
+await Context.tenantLabel({ id: 'org_1', kind: 'organization' }); // 'Acme Inc.'
+await Context.tenantLabels(tenants); // { org_1: 'Acme Inc.', org_2: 'globex' }
+```
+
+Return `undefined` to fall back to the slug or id. A resolver that throws falls back the same way. A lib that knows the tenants (an auth integration) can register a resolver with `Context.setTenantLabeler(fn)`. The `label` option always wins over it.
 
 ---
 
@@ -121,7 +212,7 @@ Every tenant-aware lib asks the context for a **filter**, and applies the same r
 | Filter mode | When | Row of this tenant | Row of another tenant | Row with no tenant |
 |-------------|------|--------------------|-----------------------|--------------------|
 | `tenant` | a request with a tenant | visible | invisible | invisible (visible with `nullRows: 'shared'`) |
-| `tenantless` | a request with no tenant, or one of a kind outside `kinds` | — | invisible | visible |
+| `tenantless` | a request with no tenant, or none of a kind in `kinds` (with `required`, an error instead) | — | invisible | visible |
 | `all` | inside `Context.allTenants()` | visible | visible | visible |
 | `system` | no context at all (boot, internal workers) | visible | visible | visible |
 
@@ -136,7 +227,9 @@ Each tenant-aware lib takes the same option:
 ```ts
 tenancy?: 'inherit' | false | {
   enabled?: 'inherit' | boolean; // 'inherit' follows ContextModule's tenancy.enabled
-  kinds?: string[];              // the lib's own allow-list, instead of the context's
+  kinds?: string[];              // the level(s) this lib scopes by, instead of the context's kinds
+  family?: string;               // scope by the tenant of this family
+  required?: boolean;            // overrides ContextModule's tenancy.required for this lib
   nullRows?: 'tenantless' | 'shared'; // default 'tenantless'
 };
 ```
@@ -183,52 +276,77 @@ it('shows only the tenant rows', async () => {
 
 Libs never import `@dudousxd/nestjs-context`. They read the accessor structurally, either the `CONTEXT_ACCESSOR` they injected with `@Optional()`, or the global slot `globalThis[Symbol.for('@dudousxd/nestjs-diagnostics:accessor')].current`, which `ContextModule` publishes at init even when `@dudousxd/nestjs-diagnostics` is not installed.
 
-Copy this file into your lib (for example `src/tenancy.ts`) as is. With the context missing, or an older context without tenancy, `readTenancy` answers `{ enabled: false }`, so your lib behaves exactly as it does today. Call it per operation, not once at boot.
+Copy this file into your lib (for example `src/tenancy.ts`) as is. With the context missing, or an older context without tenancy, `readTenancy` answers `{ enabled: false }`, so your lib behaves exactly as it does today. Call it per operation, not once at boot. With an older context, the `family` and `required` options are ignored and `tenantLabels` falls back to slug or id.
 
 ```ts
 // Local reader for the @dudousxd/nestjs-context tenancy contract. Copied into each lib;
 // it imports nothing, so the lib works with any context version or none at all.
-export interface TenantRef {
+export interface TenantLevel {
   id: string;
   kind: string;
-  source: string;
   slug?: string;
   role?: string;
+}
+export interface TenantRef extends TenantLevel {
+  source: string;
+  chain?: TenantLevel[]; // root first, this tenant last; absent for a flat tenant
+  family?: string;
 }
 export type TenantFilter =
   | { mode: 'system' }
   | { mode: 'all' }
   | { mode: 'tenantless' }
-  | { mode: 'tenant'; tenant: TenantRef };
+  | { mode: 'tenant'; tenant: TenantRef; chain?: TenantLevel[] }; // `chain`: context >= 2.1
 export type TenancyOption =
   | 'inherit'
   | false
-  | { enabled?: 'inherit' | boolean; kinds?: string[]; nullRows?: 'tenantless' | 'shared' };
+  | {
+      enabled?: 'inherit' | boolean;
+      kinds?: string[];
+      family?: string;
+      required?: boolean;
+      nullRows?: 'tenantless' | 'shared';
+    };
 export type Tenancy =
   | { enabled: false }
   | { enabled: true; nullRows: 'tenantless' | 'shared'; filter(): TenantFilter };
 
+interface FilterOptions {
+  kinds?: string[];
+  family?: string;
+  required?: boolean;
+}
 interface Accessor {
-  tenancy?(): { enabled: boolean; kinds?: string[] };
-  tenantFilter?(options?: { kinds?: string[] }): TenantFilter;
+  tenancy?(): { enabled: boolean; kinds?: string[]; required?: boolean };
+  tenantFilter?(options?: FilterOptions): TenantFilter;
+  tenantLabels?(tenants: TenantLevel[]): Promise<Record<string, string>>;
 }
 const SLOT = Symbol.for('@dudousxd/nestjs-diagnostics:accessor');
 
+function accessorOf(accessor: unknown): Accessor | undefined {
+  const slot = (globalThis as unknown as Record<symbol, { current?: unknown } | undefined>)[SLOT];
+  return (accessor ?? slot?.current ?? undefined) as Accessor | undefined;
+}
+
 /** `accessor`: the `CONTEXT_ACCESSOR` injected with `@Optional()`, if any. Call per operation. */
 export function readTenancy(option: TenancyOption = 'inherit', accessor?: unknown): Tenancy {
-  const slot = (globalThis as unknown as Record<symbol, { current?: unknown } | undefined>)[SLOT];
-  const a = (accessor ?? slot?.current) as Accessor | null | undefined;
+  const a = accessorOf(accessor);
   if (option === false || typeof a?.tenancy !== 'function' || !a.tenantFilter) {
     return { enabled: false };
   }
   const own = typeof option === 'object' ? option : {};
   const inherit = own.enabled === undefined || own.enabled === 'inherit';
   if (!(inherit ? a.tenancy().enabled : own.enabled)) return { enabled: false };
-  const kinds = own.kinds;
+  const options: FilterOptions = {};
+  if (own.kinds) options.kinds = own.kinds;
+  if (own.family !== undefined) options.family = own.family;
+  if (own.required !== undefined) options.required = own.required;
+  const tenantFilter = a.tenantFilter.bind(a);
   return {
     enabled: true,
     nullRows: own.nullRows ?? 'tenantless',
-    filter: () => a.tenantFilter!(kinds ? { kinds } : undefined),
+    // Throws the context's TenantRequiredError (403) when a tenant is required and missing.
+    filter: () => tenantFilter(Object.keys(options).length > 0 ? options : undefined),
   };
 }
 
@@ -248,6 +366,24 @@ export function rowTenantId(t: Tenancy): string | null {
   if (!t.enabled) return null;
   const f = t.filter();
   return f.mode === 'tenant' ? f.tenant.id : null;
+}
+
+/** Console labels keyed by tenant id: the app's `tenancy.label`, else the slug, else the id. */
+export async function tenantLabels(
+  tenants: TenantLevel[],
+  accessor?: unknown,
+): Promise<Record<string, string>> {
+  const a = accessorOf(accessor);
+  if (typeof a?.tenantLabels === 'function') {
+    try {
+      return await a.tenantLabels(tenants);
+    } catch {
+      // Fall back to slug/id below.
+    }
+  }
+  const out: Record<string, string> = {};
+  for (const t of tenants) out[t.id] = t.slug || t.id;
+  return out;
 }
 ```
 
@@ -277,3 +413,40 @@ export class InvoiceStore {
 ```
 
 For queries, turn the filter into a `WHERE` clause instead of filtering in memory: `tenant` → `tenant_id = :id` (or `tenant_id = :id OR tenant_id IS NULL` with `nullRows: 'shared'`), `tenantless` → `tenant_id IS NULL`, `all` and `system` → no condition.
+
+`filter()` throws `TenantRequiredError` when the app requires a tenant and the request has none. Let it propagate from request paths, so the caller gets a 403. On a path that must keep working without a tenant (recording telemetry, a health check), catch it or pass `required: false`.
+
+### What the accessor exposes
+
+Every member beyond `traceId`, `tenantId`, `userRef` and `get` is optional, so feature-detect each one:
+
+| Member | Returns |
+|--------|---------|
+| `tenancy()` | `{ enabled, kinds?, required, personal }` |
+| `tenantFilter({ kinds?, family?, required? })` | `{ mode: 'system' }`, `{ mode: 'all' }`, `{ mode: 'tenantless' }` or `{ mode: 'tenant', tenant, chain }`. `tenant` is the level that matched `kinds`. |
+| `tenant()` | The primary tenant: `{ id, kind, source, slug?, role?, chain?, family? }` |
+| `tenants()` | The primary tenant, then the other families |
+| `tenantChain(family?)` | The levels, root first |
+| `requireTenant({ kinds?, family? })` | The matching tenant, or throws `TenantRequiredError` |
+| `tenantLabel(level)` / `tenantLabels(levels)` | Display labels (`Promise`) |
+
+### Restoring a tenant around later work
+
+A lib that resumes work after the request (a durable run, a scheduled job) stamps the tenant on the work and restores it with `withTenant`. Read it from the tenancy slot, which `ContextModule` publishes at init:
+
+```ts
+interface TenancySlot {
+  version: 1;
+  withTenant<T>(tenant: { id: string; kind: string; chain?: unknown[]; family?: string } | null, fn: () => T): T;
+  // also: tenancy, tenant, tenants, tenantChain, tenantFilter, requireTenant,
+  // setTenant, allTenants, tenantLabel, tenantLabels, setTenantLabeler
+}
+const slot = (globalThis as Record<symbol, TenancySlot | undefined>)[
+  Symbol.for('@dudousxd/nestjs-context:tenancy')
+];
+if (slot?.version === 1) {
+  await slot.withTenant({ id: row.tenantId, kind: row.tenantKind }, () => resume(row));
+}
+```
+
+Treat a missing slot, or a `version` other than `1`, as tenancy off.

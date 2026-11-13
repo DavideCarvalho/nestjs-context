@@ -8,13 +8,21 @@ import {
   resolveBaggageKeys,
 } from './baggage.js';
 import {
+  type PersonalTenantInput,
   type ResolvedTenancy,
+  type SetTenantOptions,
   type TenancyConfig,
   type TenantFilter,
   type TenantFilterOptions,
   type TenantInput,
+  type TenantLabelResolver,
+  type TenantLevel,
   type TenantRef,
+  TenantRequiredError,
+  chainOf,
+  copyTenant,
   legacyTenant,
+  matchTenant,
   resolveTenancy,
   toTenantRef,
 } from './tenancy.js';
@@ -55,6 +63,12 @@ export interface ContextStore {
    */
   tenant?: TenantRef;
   /**
+   * Tenants of other families active in this request, each with its `family`
+   * (e.g. a patient's `account` next to the `clinic`). Write them with
+   * `Context.setTenant(ref, { family })`.
+   */
+  tenantFamilies?: TenantRef[];
+  /**
    * `'all'` inside {@link Context.allTenants}. Process-local: never carried
    * across a boundary.
    */
@@ -82,6 +96,8 @@ export interface ContextCarrier {
   tenantId?: string;
   /** The active tenant, when one was set with a kind (see {@link Context.setTenant}). */
   tenant?: TenantRef;
+  /** Tenants of other families, when the request has any. */
+  tenantFamilies?: TenantRef[];
   userRef?: UserRef;
 }
 
@@ -156,6 +172,9 @@ let config: ContextConfig = {};
 /** {@link ContextConfig.tenancy} with defaults applied. */
 let tenancy: ResolvedTenancy = resolveTenancy(undefined);
 
+/** Label resolver registered at runtime by a lib. `tenancy.label` wins over it. */
+let registeredLabeler: TenantLabelResolver | undefined;
+
 const SYSTEM_FILTER: TenantFilter = Object.freeze({ mode: 'system' as const });
 const ALL_FILTER: TenantFilter = Object.freeze({ mode: 'all' as const });
 const TENANTLESS_FILTER: TenantFilter = Object.freeze({ mode: 'tenantless' as const });
@@ -174,6 +193,7 @@ function configsConflict(a: ContextConfig, b: ContextConfig): boolean {
     a.serialize !== b.serialize ||
     a.deserialize !== b.deserialize ||
     JSON.stringify(a.tenancy) !== JSON.stringify(b.tenancy) ||
+    a.tenancy?.label !== b.tenancy?.label ||
     // Enrichers are function arrays — compare by reference (same approach as the
     // serialize/deserialize fns): a distinct array is treated as a config change.
     a.enrichers !== b.enrichers
@@ -204,7 +224,7 @@ function storedTenant(store: ContextStore): TenantRef | undefined {
   return store.tenantId === undefined || store.tenantId === tenant.id ? tenant : undefined;
 }
 
-/** The active tenant of a store: the stored ref, else a legacy ref from a plain `tenantId`. */
+/** The tenant set on a store: the stored ref, else a legacy ref from a plain `tenantId`. */
 function tenantOf(store: ContextStore): TenantRef | undefined {
   const tenant = storedTenant(store);
   if (tenant !== undefined) {
@@ -212,6 +232,79 @@ function tenantOf(store: ContextStore): TenantRef | undefined {
   }
   const id = store.tenantId;
   return id !== undefined && id !== '' ? legacyTenant(id) : undefined;
+}
+
+/** The signed-in user as a personal tenant, with `tenancy.personal` on. */
+function personalTenant(store: ContextStore): TenantRef | undefined {
+  if (!(tenancy.enabled && tenancy.personal) || store.userRef === undefined) {
+    return undefined;
+  }
+  const id = store.userRef.id;
+  return id === undefined || id === null || id === ''
+    ? undefined
+    : { id: String(id), kind: 'user', source: 'personal' };
+}
+
+/** The primary tenant of a store, falling back to the personal tenant. */
+function primaryTenant(store: ContextStore): TenantRef | undefined {
+  return tenantOf(store) ?? personalTenant(store);
+}
+
+/** The other families' tenants of a store. */
+function familiesOf(store: ContextStore): readonly TenantRef[] {
+  return Array.isArray(store.tenantFamilies) ? store.tenantFamilies : [];
+}
+
+/** Resolve what `setTenant`/`withTenant` received into a ref (or `undefined` to clear). */
+function inputToRef(
+  store: ContextStore | undefined,
+  input: TenantInput | PersonalTenantInput | null,
+): TenantRef | undefined {
+  if (input === null) {
+    return undefined;
+  }
+  if (
+    input !== undefined &&
+    typeof input === 'object' &&
+    input.kind === 'user' &&
+    (input.id === undefined || input.id === null)
+  ) {
+    if (!tenancy.personal) {
+      throw new TypeError(
+        '[nestjs-context] `setTenant({ kind: "user" })` without an id needs `tenancy.personal: true`.',
+      );
+    }
+    const userId = store?.userRef?.id;
+    if (userId === undefined || userId === null || userId === '') {
+      throw new TypeError(
+        '[nestjs-context] `setTenant({ kind: "user" })` needs a signed-in user (`userRef`) on the context.',
+      );
+    }
+    return toTenantRef({ ...input, id: userId, source: 'personal' });
+  }
+  return toTenantRef(input as TenantInput);
+}
+
+/** Throw on a `family` option that is not a non-empty string. */
+function assertFamily(family: unknown): asserts family is string {
+  if (typeof family !== 'string' || family === '') {
+    throw new TypeError('[nestjs-context] `family` must be a non-empty string.');
+  }
+}
+
+/** Write a tenant of a named family (or remove it, with `undefined`). */
+function writeFamily(store: ContextStore, family: string, ref: TenantRef | undefined): void {
+  assertFamily(family);
+  const others = familiesOf(store).filter((candidate) => candidate.family !== family);
+  if (ref !== undefined) {
+    others.push({ ...ref, family });
+  }
+  if (others.length > 0) {
+    store.tenantFamilies = others;
+  } else {
+    // biome-ignore lint/performance/noDelete: an absent key, not an `undefined` one.
+    delete store.tenantFamilies;
+  }
 }
 
 /** Set (or clear, with `undefined`) both tenant fields of a store. */
@@ -234,6 +327,7 @@ function writeTenant(store: ContextStore, ref: TenantRef | undefined): void {
  * malformed, is dropped, so `tenantId` wins.
  */
 export function syncTenantFields(store: ContextStore): ContextStore {
+  syncFamilies(store);
   const raw = store.tenant as TenantInput | undefined | null;
   if (raw === undefined) {
     return store;
@@ -254,6 +348,31 @@ export function syncTenantFields(store: ContextStore): ContextStore {
   return store;
 }
 
+/** Normalize `tenantFamilies`: drop malformed entries and entries with no `family`. */
+function syncFamilies(store: ContextStore): void {
+  const raw = store.tenantFamilies as unknown;
+  if (raw === undefined) {
+    return;
+  }
+  const families: TenantRef[] = [];
+  if (Array.isArray(raw)) {
+    for (const item of raw as Array<TenantInput | null>) {
+      try {
+        if (item === null || typeof item !== 'object' || typeof item.family !== 'string') continue;
+        families.push(toTenantRef(item, item.source ?? 'app'));
+      } catch {
+        // A malformed family tenant is dropped, like a malformed `tenant`.
+      }
+    }
+  }
+  if (families.length > 0) {
+    store.tenantFamilies = families;
+  } else {
+    // biome-ignore lint/performance/noDelete: an absent key, not an `undefined` one.
+    delete store.tenantFamilies;
+  }
+}
+
 /** With tenancy on, put the tenant on a carrier even if the carrier config left it out. */
 function addTenantToCarrier(store: ContextStore, input: ContextCarrier): ContextCarrier {
   const tenant = tenantOf(store);
@@ -270,7 +389,11 @@ function addTenantToCarrier(store: ContextStore, input: ContextCarrier): Context
     tenant.source !== 'legacy' &&
     carrier.tenantId === tenant.id
   ) {
-    carrier.tenant = { ...tenant };
+    carrier.tenant = copyTenant(tenant);
+  }
+  const families = familiesOf(store);
+  if (carrier.tenantFamilies === undefined && families.length > 0) {
+    carrier.tenantFamilies = families.map(copyTenant);
   }
   return carrier;
 }
@@ -322,6 +445,14 @@ function fromCarrier(carrier: ContextCarrier): ContextStore {
   if (tenant !== undefined) {
     store.tenant = tenant;
   }
+  if (Array.isArray(carrier.tenantFamilies)) {
+    store.tenantFamilies = carrier.tenantFamilies.map(
+      (ref) =>
+        (ref !== null && typeof ref === 'object'
+          ? { ...ref, source: 'carrier' }
+          : ref) as TenantRef,
+    );
+  }
   if (carrier.userRef !== undefined) {
     store.userRef = carrier.userRef;
   }
@@ -342,7 +473,11 @@ function defaultSerialize(store: ContextStore): ContextCarrier {
       c.tenantId = tenantId;
     }
     if (tenant !== undefined) {
-      c.tenant = tenant;
+      c.tenant = copyTenant(tenant);
+    }
+    const families = familiesOf(store);
+    if (families.length > 0) {
+      c.tenantFamilies = families.map(copyTenant);
     }
     if (store.userRef !== undefined) {
       c.userRef = store.userRef;
@@ -412,6 +547,10 @@ export const Context = {
         return;
       }
       store[key] = value;
+      if (key === 'tenantFamilies') {
+        syncFamilies(store);
+        return;
+      }
       if (key === 'tenantId' && store.tenant !== undefined && store.tenant.id !== value) {
         // A plain `tenantId` write replaces the tenant: it now reads as a legacy ref.
         // biome-ignore lint/performance/noDelete: an absent key, not an `undefined` one.
@@ -463,19 +602,54 @@ export const Context = {
     if (store === undefined) {
       return undefined;
     }
-    return store.tenantId ?? storedTenant(store)?.id;
+    return store.tenantId ?? storedTenant(store)?.id ?? personalTenant(store)?.id;
   },
 
   /**
    * The active tenant, or `undefined` when there is none. A store that only has a
    * plain `tenantId` (from `initialize`, an enricher or an old carrier) reads as
-   * `{ id, kind: 'unknown', source: 'legacy' }`.
+   * `{ id, kind: 'unknown', source: 'legacy' }`. With `tenancy.personal`, a
+   * signed-in user with no tenant reads as `{ id: userRef.id, kind: 'user', source: 'personal' }`.
    */
   tenant(): TenantRef | undefined {
     const store = als.getStore();
-    const tenant = store === undefined ? undefined : tenantOf(store);
+    const tenant = store === undefined ? undefined : primaryTenant(store);
     // A copy: mutating what a caller got must never rewrite the active store.
-    return tenant === undefined ? undefined : { ...tenant };
+    return tenant === undefined ? undefined : copyTenant(tenant);
+  },
+
+  /** Every active tenant: the primary one first, then the other families. */
+  tenants(): TenantRef[] {
+    const store = als.getStore();
+    if (store === undefined) {
+      return [];
+    }
+    const primary = primaryTenant(store);
+    const all = primary === undefined ? [...familiesOf(store)] : [primary, ...familiesOf(store)];
+    return all.map(copyTenant);
+  },
+
+  /**
+   * The active tenant chain, root first (e.g. `[clinic, unit]`; a flat tenant is a
+   * chain of one, no tenant an empty one). Pass a family to read that family's chain.
+   */
+  tenantChain(family?: string): TenantLevel[] {
+    const store = als.getStore();
+    if (store === undefined) {
+      return [];
+    }
+    let ref: TenantRef | undefined;
+    if (family === undefined) {
+      ref = primaryTenant(store);
+    } else {
+      // A primary written with a `family` is matched by `tenantFilter({ family })` too.
+      const primary = primaryTenant(store);
+      ref =
+        primary?.family === family
+          ? primary
+          : familiesOf(store).find((candidate) => candidate.family === family);
+    }
+    return ref === undefined ? [] : chainOf(ref);
   },
 
   /**
@@ -483,31 +657,60 @@ export const Context = {
    * on the server (from a verified token claim, a membership lookup, …). Writes
    * `tenant` and `tenantId`; `null` clears both. `source` defaults to `'app'`.
    *
+   * ```ts
+   * Context.setTenant({ id: clinic.id, kind: 'clinic' });
+   * Context.setTenant({ id: unit.id, kind: 'unit', chain: [{ id: clinic.id, kind: 'clinic' }] });
+   * Context.setTenant({ id: account.id, kind: 'account' }, { family: 'account' });
+   * Context.setTenant({ kind: 'user' }); // with tenancy.personal: the signed-in user
+   * ```
+   *
+   * With `{ family }`, it sets (or, with `null`, clears) the tenant of that family
+   * next to the primary tenant, and leaves `tenant`/`tenantId` alone. Without it,
+   * `null` clears only the primary tenant; the other families stay (unlike
+   * {@link Context.withTenant}, whose `null` runs `fn` with no tenant at all).
+   *
    * Outside an active context it is a no-op with a one-shot warning, like
-   * {@link Context.set}. Throws a `TypeError` when the tenant has no `id`.
+   * {@link Context.set}. Throws a `TypeError` when the tenant is malformed.
    */
-  setTenant(input: TenantInput | null): void {
-    const ref = input === null ? undefined : toTenantRef(input);
+  setTenant(input: TenantInput | PersonalTenantInput | null, options?: SetTenantOptions): void {
     const store = als.getStore();
+    const ref = inputToRef(store, input);
     if (store === undefined) {
       warnSetOutsideContext('Context.setTenant(…)');
+      return;
+    }
+    if (options?.family !== undefined) {
+      writeFamily(store, options.family, ref);
       return;
     }
     writeTenant(store, ref);
   },
 
   /**
-   * Run `fn` with `input` as the active tenant (`null` = no tenant), in a copy of
-   * the current store, or in a new store when there is none (scripts, seeders,
-   * webhook handlers, tests). Also leaves any {@link Context.allTenants} scope.
+   * Run `fn` with `input` as the active tenant (`null` = no tenant, in any family),
+   * in a copy of the current store, or in a new store when there is none (scripts,
+   * seeders, webhook handlers, tests). Also leaves any {@link Context.allTenants}
+   * scope. With `{ family }`, only that family's tenant changes.
    */
-  withTenant<T>(input: TenantInput | null, fn: () => T): T {
-    const ref = input === null ? undefined : toTenantRef(input);
+  withTenant<T>(
+    input: TenantInput | PersonalTenantInput | null,
+    fn: () => T,
+    options?: SetTenantOptions,
+  ): T {
     const current = als.getStore();
+    const ref = inputToRef(current, input);
     const store: ContextStore = current ? { ...current } : { traceId: randomTraceId() };
     // biome-ignore lint/performance/noDelete: an absent key, not an `undefined` one.
     delete store.tenantScope;
-    writeTenant(store, ref);
+    if (options?.family !== undefined) {
+      writeFamily(store, options.family, ref);
+    } else {
+      if (input === null) {
+        // biome-ignore lint/performance/noDelete: an absent key, not an `undefined` one.
+        delete store.tenantFamilies;
+      }
+      writeTenant(store, ref);
+    }
     return als.run(store, fn);
   },
 
@@ -523,9 +726,9 @@ export const Context = {
     return als.run(store, fn);
   },
 
-  /** The resolved `tenancy` option: `{ enabled, kinds? }`. */
+  /** The resolved `tenancy` option: `{ enabled, kinds?, required, personal }`. */
   tenancy(): ResolvedTenancy {
-    const out: ResolvedTenancy = { enabled: tenancy.enabled };
+    const out: ResolvedTenancy = { ...tenancy };
     if (tenancy.kinds !== undefined) {
       out.kinds = [...tenancy.kinds];
     }
@@ -536,9 +739,16 @@ export const Context = {
    * How a lib must scope data right now:
    * - `system`: no active context. Do not filter.
    * - `all`: inside {@link Context.allTenants}. Do not filter.
-   * - `tenantless`: a context with no tenant, or with a tenant whose kind is not
-   *   in `kinds` (the lib's, else the context's). Only rows with no tenant.
-   * - `tenant`: only this tenant's rows; stamp writes with `tenant.id`.
+   * - `tenantless`: a context with no tenant, or with no level of a kind in `kinds`
+   *   (the lib's, else the context's). Only rows with no tenant.
+   * - `tenant`: only this tenant's rows; stamp writes with `tenant.id`. With
+   *   `kinds`, `tenant` is the most specific level of the chain whose kind is
+   *   listed, so a lib configured for `clinic` scopes by the clinic while another
+   *   configured for `unit` scopes by the unit. `chain` is the path down to it.
+   *
+   * With a tenant required (`options.required`, else `tenancy.required` while
+   * tenancy is enabled), it throws {@link TenantRequiredError} instead of
+   * answering `tenantless`. `system` and `all` never throw.
    *
    * It does not check `tenancy().enabled`: the lib decides whether tenancy is on
    * for it, then asks for the filter.
@@ -551,12 +761,81 @@ export const Context = {
     if (store.tenantScope === 'all') {
       return ALL_FILTER;
     }
-    const tenant = tenantOf(store);
-    const kinds = options?.kinds ?? tenancy.kinds;
-    if (tenant !== undefined && (kinds === undefined || kinds.includes(tenant.kind))) {
-      return { mode: 'tenant', tenant: { ...tenant } };
+    const match = matchTenant(
+      primaryTenant(store),
+      familiesOf(store),
+      options?.kinds ?? tenancy.kinds,
+      options?.family,
+    );
+    if (match !== undefined) {
+      return { mode: 'tenant', tenant: match.tenant, chain: match.chain };
+    }
+    if (options?.required ?? (tenancy.enabled && tenancy.required)) {
+      throw new TenantRequiredError();
     }
     return TENANTLESS_FILTER;
+  },
+
+  /**
+   * The active tenant (the level matching `kinds`, of `family` when given), or
+   * throw {@link TenantRequiredError}. For routes and jobs that only make sense
+   * inside a tenant. Inside {@link Context.allTenants} there is no single tenant,
+   * so it throws too.
+   */
+  requireTenant(options?: Omit<TenantFilterOptions, 'required'>): TenantRef {
+    const store = als.getStore();
+    const match =
+      store !== undefined && store.tenantScope !== 'all'
+        ? matchTenant(
+            primaryTenant(store),
+            familiesOf(store),
+            options?.kinds ?? tenancy.kinds,
+            options?.family,
+          )
+        : undefined;
+    if (match === undefined) {
+      throw new TenantRequiredError();
+    }
+    return match.tenant;
+  },
+
+  /**
+   * The display label of a tenant, for console pickers and reports: what
+   * `tenancy.label` (or a resolver registered with {@link Context.setTenantLabeler})
+   * returns, else the tenant's `slug`, else its id. Never throws.
+   */
+  async tenantLabel(tenant: TenantLevel): Promise<string> {
+    const resolver = config.tenancy?.label ?? registeredLabeler;
+    if (resolver !== undefined) {
+      try {
+        const label = await resolver({ ...tenant });
+        if (typeof label === 'string' && label !== '') {
+          return label;
+        }
+      } catch {
+        // A failing resolver falls back to the slug or id.
+      }
+    }
+    return tenant.slug !== undefined && tenant.slug !== '' ? tenant.slug : tenant.id;
+  },
+
+  /** Labels for several tenants at once, keyed by tenant id. See {@link Context.tenantLabel}. */
+  async tenantLabels(tenants: TenantLevel[]): Promise<Record<string, string>> {
+    const labels = await Promise.all(tenants.map((tenant) => Context.tenantLabel(tenant)));
+    const out: Record<string, string> = {};
+    tenants.forEach((tenant, i) => {
+      out[tenant.id] = labels[i] as string;
+    });
+    return out;
+  },
+
+  /**
+   * Register a label resolver at runtime (for a lib that knows the tenants, such
+   * as an auth integration). `tenancy.label` of the module config always wins.
+   * `undefined` unregisters it.
+   */
+  setTenantLabeler(resolver: TenantLabelResolver | undefined): void {
+    registeredLabeler = resolver;
   },
 
   userRef(): UserRef | undefined {
@@ -622,6 +901,7 @@ export const Context = {
   resetConfig(): void {
     config = {};
     tenancy = resolveTenancy(undefined);
+    registeredLabeler = undefined;
     configured = false;
   },
 

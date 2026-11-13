@@ -168,6 +168,7 @@ describe('Context.tenantFilter', () => {
       expect(Context.tenantFilter()).toEqual({
         mode: 'tenant',
         tenant: { ...acme, source: 'app' },
+        chain: [acme],
       }),
     );
   });
@@ -188,6 +189,7 @@ describe('Context.tenantFilter', () => {
       expect(Context.tenantFilter()).toEqual({
         mode: 'tenant',
         tenant: { id: 'legacy', kind: 'unknown', source: 'legacy' },
+        chain: [{ id: 'legacy', kind: 'unknown' }],
       });
     });
   });
@@ -195,12 +197,17 @@ describe('Context.tenantFilter', () => {
 
 describe('Context.tenancy', () => {
   it('is off by default', () => {
-    expect(Context.tenancy()).toEqual({ enabled: false });
+    expect(Context.tenancy()).toEqual({ enabled: false, required: false, personal: false });
   });
 
   it('reflects the configured option', () => {
     Context.configure({ tenancy: { enabled: true, kinds: ['organization'] } });
-    expect(Context.tenancy()).toEqual({ enabled: true, kinds: ['organization'] });
+    expect(Context.tenancy()).toEqual({
+      enabled: true,
+      kinds: ['organization'],
+      required: false,
+      personal: false,
+    });
   });
 
   it('forRoot pushes it onto the singleton', () => {
@@ -318,7 +325,11 @@ describe('accessor', () => {
     Context.configure({ tenancy: { enabled: true } });
     Context.withTenant(acme, () => {
       expect(contextAccessor.tenant()?.id).toBe('org_1');
-      expect(contextAccessor.tenancy()).toEqual({ enabled: true });
+      expect(contextAccessor.tenancy()).toEqual({
+        enabled: true,
+        required: false,
+        personal: false,
+      });
       expect(contextAccessor.tenantFilter({ kinds: ['clinic'] })).toEqual({ mode: 'tenantless' });
     });
   });
