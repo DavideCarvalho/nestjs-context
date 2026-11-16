@@ -42,8 +42,8 @@ importers:
   packages/core:
     devDependencies:
       '@dudousxd/nestjs-diagnostics':
-        specifier: 0.10.0
-        version: 0.10.0(@nestjs/common@12.5.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.5.0)(reflect-metadata@0.2.2)
+        specifier: 0.11.0
+        version: 0.11.0(@nestjs/common@12.5.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.5.0)(reflect-metadata@0.2.2)
       '@nestjs/authentication':
         specifier: 0.1.5
         version: 0.1.5(@nestjs/common@12.5.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.5.0)(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -238,8 +238,8 @@ packages:
     resolution: {integrity: sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ==}
     engines: {node: '>=0.1.90'}
 
-  '@dudousxd/nestjs-diagnostics@0.10.0':
-    resolution: {integrity: sha512-gW3i3VRzaBuqVyVVgm0W9nx9Zvf/1CePsaYQ4JA8J2fTcRgb+kmNZoraPm6z2i8R8/PoXZ/7OLR32IgbNEe4XA==}
+  '@dudousxd/nestjs-diagnostics@0.11.0':
+    resolution: {integrity: sha512-ZDayonPt0xeOiBcbGlAKGTkWRIbjWFkQq0yqiEbqBM3WAX8/3Z/Wh1SdvWpoqLR09QTBYuMtXwuKwMMeo80HmA==}
     engines: {node: '>=24'}
     peerDependencies:
       '@nestjs/common': ^10 || ^11 || ^12
@@ -2166,7 +2166,7 @@ snapshots:
   '@colors/colors@1.5.0':
     optional: true
 
-  '@dudousxd/nestjs-diagnostics@0.10.0(@nestjs/common@12.5.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.5.0)(reflect-metadata@0.2.2)':
+  '@dudousxd/nestjs-diagnostics@0.11.0(@nestjs/common@12.5.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@12.5.0)(reflect-metadata@0.2.2)':
     optionalDependencies:
       '@nestjs/common': 12.5.0(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/core': 12.5.0(@nestjs/common@12.5.0(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/platform-express@12.5.0)(reflect-metadata@0.2.2)(rxjs@7.8.2)
