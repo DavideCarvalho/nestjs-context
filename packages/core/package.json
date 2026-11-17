@@ -58,7 +58,7 @@
   },
   "devDependencies": {
     "@dudousxd/nestjs-diagnostics": "0.11.0",
-    "@nestjs/authentication": "0.1.5",
+    "@nestjs/authentication": "0.1.6",
     "@nestjs/common": "12.5.0",
     "@nestjs/core": "12.5.0",
     "@nestjs/platform-express": "12.5.0",
